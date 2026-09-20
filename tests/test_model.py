@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from cfb_power.features import model_feature_columns
-from cfb_power.model import fit_score_models, predict_matchups
+from cfb_power.model import _normal_cdf, fit_score_models, predict_matchups
 
 
 def test_score_model_produces_required_outputs():
@@ -33,3 +33,10 @@ def test_model_feature_columns_are_unique_when_indicator_exists():
     features = model_feature_columns(frame)
     assert features.count("home_field_indicator") == 1
     assert len(features) == len(set(features))
+
+
+def test_normal_cdf_returns_expected_probabilities():
+    probabilities = _normal_cdf(np.array([-1.0, 0.0, 1.0]))
+    assert np.isclose(probabilities[1], 0.5)
+    assert probabilities[0] < 0.5 < probabilities[2]
+    assert np.all((probabilities >= 0.0) & (probabilities <= 1.0))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import erf, sqrt
 
 import numpy as np
 import pandas as pd
@@ -54,6 +55,12 @@ def fit_score_models(training_matchups: pd.DataFrame, paths: Paths | None = None
     return models
 
 
+def _normal_cdf(values: pd.Series | np.ndarray) -> np.ndarray:
+    """Standard-normal CDF without relying on removed NumPy namespace aliases."""
+    array = np.asarray(values, dtype=float)
+    return 0.5 * (1.0 + np.vectorize(erf)(array / sqrt(2.0)))
+
+
 def predict_matchups(matchups: pd.DataFrame, models: ScoreModels) -> pd.DataFrame:
     result = matchups.copy()
     result["home_expected_points"] = models.home.predict(result[models.features]).clip(0, 70)
@@ -61,8 +68,8 @@ def predict_matchups(matchups: pd.DataFrame, models: ScoreModels) -> pd.DataFram
     result["projected_spread_home"] = result["home_expected_points"] - result["away_expected_points"]
     result["projected_total"] = result["home_expected_points"] + result["away_expected_points"]
     z = result["projected_spread_home"] / models.margin_residual_std
-    result["home_win_probability"] = 0.5 * (1.0 + np.vectorize(np.math.erf)(z / np.sqrt(2.0)))
-    point_interval = models.margin_residual_std / np.sqrt(2.0)
+    result["home_win_probability"] = _normal_cdf(z)
+    point_interval = models.margin_residual_std / sqrt(2.0)
     result["home_score_low"] = (result["home_expected_points"] - point_interval).clip(0).round(1)
     result["home_score_high"] = (result["home_expected_points"] + point_interval).round(1)
     result["away_score_low"] = (result["away_expected_points"] - point_interval).clip(0).round(1)
