@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Environments and secrets
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Generated project data
+/data/raw/
+/data/processed/
+/data/exports/
+/models/
+!data/.gitkeep
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/exports/.gitkeep
+!models/.gitkeep
+
+# Excel temporary files
+~$*.xlsx
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

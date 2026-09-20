@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+GAME_COLUMNS = [
+    "game_id",
+    "season",
+    "week",
+    "game_date",
+    "home_team_id",
+    "away_team_id",
+    "home_score",
+    "away_score",
+    "neutral_site",
+    "completed",
+]
+
+TEAM_GAME_STAT_COLUMNS = [
+    "game_id",
+    "team_id",
+    "opponent_id",
+    "is_home",
+    "points",
+    "points_allowed",
+    "total_yards",
+    "offensive_plays",
+    "passing_yards",
+    "rushing_yards",
+    "turnovers",
+    "takeaways",
+    "third_down_attempts",
+    "third_down_conversions",
+    "red_zone_attempts",
+    "red_zone_touchdowns",
+    "penalties",
+    "penalty_yards",
+    "time_of_possession_seconds",
+]
+
+ROLLING_METRICS = [
+    "points",
+    "points_allowed",
+    "yards_per_play",
+    "passing_yards_per_play",
+    "rushing_yards_per_play",
+    "turnovers",
+    "takeaways",
+    "third_down_rate",
+    "red_zone_td_rate",
+    "penalty_yards",
+    "time_of_possession_seconds",
+]
+
+PREDICTION_COLUMNS = [
+    "game_id",
+    "season",
+    "week",
+    "game_date",
+    "away_team_id",
+    "home_team_id",
+    "away_expected_points",
+    "home_expected_points",
+    "projected_spread_home",
+    "projected_total",
+    "home_win_probability",
+    "away_score_low",
+    "away_score_high",
+    "home_score_low",
+    "home_score_high",
+    "confidence_tier",
+    "model_version",
+]
