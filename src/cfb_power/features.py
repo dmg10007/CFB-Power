@@ -71,7 +71,7 @@ def build_matchup_features(games: pd.DataFrame, team_features: pd.DataFrame) -> 
 
 
 def model_feature_columns(matchups: pd.DataFrame) -> list[str]:
-    columns = [column for column in matchups.columns if column.startswith(("home_", "away_"))]
+    """Return unique numeric predictor columns in deterministic order."""
     excluded = {
         "home_team_id",
         "away_team_id",
@@ -80,6 +80,11 @@ def model_feature_columns(matchups: pd.DataFrame) -> list[str]:
         "home_target_points",
         "away_target_points",
     }
-    return [column for column in columns if column not in excluded and matchups[column].dtype != "object"] + [
-        "home_field_indicator"
+    feature_columns = [
+        column
+        for column in matchups.columns
+        if column.startswith(("home_", "away_"))
+        and column not in excluded
+        and pd.api.types.is_numeric_dtype(matchups[column])
     ]
+    return list(dict.fromkeys([*feature_columns, "home_field_indicator"]))

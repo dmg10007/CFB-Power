@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 
+from cfb_power.features import model_feature_columns
 from cfb_power.model import fit_score_models, predict_matchups
 
 
@@ -19,3 +20,16 @@ def test_score_model_produces_required_outputs():
     predicted = predict_matchups(frame, models)
     assert {"home_expected_points", "away_expected_points", "projected_total", "home_win_probability"}.issubset(predicted.columns)
     assert predicted["home_win_probability"].between(0, 1).all()
+
+
+def test_model_feature_columns_are_unique_when_indicator_exists():
+    frame = pd.DataFrame({
+        "home_points_l3": [20.0],
+        "away_points_l3": [18.0],
+        "home_field_indicator": [1],
+        "home_target_points": [21.0],
+        "away_target_points": [17.0],
+    })
+    features = model_feature_columns(frame)
+    assert features.count("home_field_indicator") == 1
+    assert len(features) == len(set(features))
