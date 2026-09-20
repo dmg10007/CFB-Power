@@ -11,9 +11,19 @@ from openpyxl.utils import get_column_letter
 from .config import Paths
 
 
+def _excel_safe_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Copy a frame and remove timezone metadata Excel cannot serialize."""
+    safe = frame.copy()
+    for column in safe.columns:
+        if isinstance(safe[column].dtype, pd.DatetimeTZDtype):
+            safe[column] = safe[column].dt.tz_localize(None)
+    return safe
+
+
 def _write_dataframe(ws, frame: pd.DataFrame) -> None:
-    ws.append(list(frame.columns))
-    for row in frame.itertuples(index=False, name=None):
+    safe_frame = _excel_safe_frame(frame)
+    ws.append(list(safe_frame.columns))
+    for row in safe_frame.itertuples(index=False, name=None):
         ws.append(list(row))
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
@@ -22,9 +32,11 @@ def _write_dataframe(ws, frame: pd.DataFrame) -> None:
         cell.font = Font(color="FFFFFF", bold=True)
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center")
-    for index, column in enumerate(frame.columns, start=1):
-        values = [str(column), *[str(value) for value in frame[column].head(100).fillna("")]]
-        ws.column_dimensions[get_column_letter(index)].width = min(max(len(value) for value in values) + 2, 28)
+    for index, column in enumerate(safe_frame.columns, start=1):
+        values = [str(column), *[str(value) for value in safe_frame[column].head(100).fillna("")]]
+        ws.column_dimensions[get_column_letter(index)].width = min(
+            max(len(value) for value in values) + 2, 28
+        )
 
 
 def export_all(
@@ -66,6 +78,14 @@ def export_all(
             probability_col = get_column_letter(frame.columns.get_loc("home_win_probability") + 1)
             ws.conditional_formatting.add(
                 f"{probability_col}2:{probability_col}{len(frame) + 1}",
-                ColorScaleRule(start_type="min", start_color="F8696B", mid_type="percentile", mid_value=50, mid_color="FFEB84", end_type="max", end_color="63BE7B"),
+                ColorScaleRule(
+                    start_type="min",
+                    start_color="F8696B",
+                    mid_type="percentile",
+                    mid_value=50,
+                    mid_color="FFEB84",
+                    end_type="max",
+                    end_color="63BE7B",
+                ),
             )
     wb.save(paths.workbook_xlsx)
