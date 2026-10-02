@@ -32,4 +32,4 @@ class CfbdClient:
             return json.loads(response.read().decode("utf-8"))
 
     def get_advanced_box(self, game_id: int) -> Any:
-        return self.get_json("/game/box/advanced", {"gameId": game_id})
+        return self.get_json("/game/box/advanced", {"id": game_id})
