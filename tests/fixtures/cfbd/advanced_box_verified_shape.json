@@ -1,0 +1,17 @@
+{
+  "gameInfo": {"id": 1},
+  "teams": {
+    "ppa": [
+      {"team": "Alpha", "plays": 60, "overall": {"total": 0.2, "quarter1": 0.1}},
+      {"team": "Beta", "plays": 55, "overall": {"total": -0.1, "quarter1": 0.0}}
+    ],
+    "successRates": [
+      {"team": "Alpha", "overall": {"total": 0.45}},
+      {"team": "Beta", "overall": {"total": 0.38}}
+    ],
+    "havoc": [
+      {"team": "Alpha", "total": 0.1},
+      {"team": "Beta", "total": 0.14}
+    ]
+  }
+}
