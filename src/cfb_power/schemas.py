@@ -44,7 +44,6 @@ ROLLING_METRICS = [
     "turnovers",
     "takeaways",
     "third_down_rate",
-    "red_zone_td_rate",
     "penalty_yards",
     "time_of_possession_seconds",
 ]
