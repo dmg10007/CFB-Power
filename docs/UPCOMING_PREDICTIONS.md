@@ -28,6 +28,7 @@ This model was chosen because it had the lowest spread error and Brier score amo
 - Only games with a confirmed kickoff after the as-of time are forecast. Games that have started, are in progress, or have scores but are not marked completed are listed in `skipped.csv` with a reason.
 - Each forecast shows how many prior games each team has played and a `low_history` flag when either team has fewer than the minimum.
 - A warning is recorded when the newest completed game is more than 9 days older than the as-of time, which usually means a recent week has not been captured.
+- A warning is recorded when any game is past kickoff with no recorded result (in progress, or results not yet captured). Team histories exclude those games, so recapture that week before relying on the forecasts. This catches the case the age check misses: a single uncaptured week whose newest completed game is still under 9 days old. The count is also stored in the manifest as `past_kickoff_unresolved`.
 - Team names are read from the hash-verified raw schedule archives of the dataset's input snapshots. If an archive is missing or changed, names are left blank with a warning and forecasts are still produced with team IDs.
 - The command fails without writing a run if the dataset has no completed games or no forecastable games.
 

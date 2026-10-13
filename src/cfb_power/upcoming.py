@@ -166,6 +166,12 @@ def predict_upcoming(
         warnings.append(
             f"latest completed game is {age_days:.0f} days before as-of time; capture recent weeks before relying on these forecasts"
         )
+    unresolved = sum(1 for item in skipped if item["reason"].startswith("kickoff has passed"))
+    if unresolved:
+        warnings.append(
+            f"{unresolved} games are past kickoff with no recorded result (in progress, or results not yet captured); "
+            "team histories exclude them, so recapture that week before relying on these forecasts"
+        )
     low = int(predictions["low_history"].sum())
     if low:
         warnings.append(f"{low} of {len(predictions)} games involve a team with fewer than {min_history_games} prior games")
@@ -200,7 +206,7 @@ def predict_upcoming(
         "settings": {"min_history_games": min_history_games, "stale_days": STALE_DAYS},
         "counts": {
             "upcoming_in_dataset": int(len(upcoming)), "predicted": int(len(predictions)),
-            "skipped": len(skipped), "low_history": low,
+            "skipped": len(skipped), "low_history": low, "past_kickoff_unresolved": unresolved,
         },
         "skip_reasons": reasons, "warnings": warnings, "outputs": outputs,
         "notes": [
