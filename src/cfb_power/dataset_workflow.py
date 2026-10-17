@@ -163,7 +163,7 @@ def discover_snapshots(data_dir: Path | str) -> list[Path]:
     )
 
 
-def assemble_dataset(snapshot_dirs, data_dir: Path | str) -> Path:
+def assemble_dataset(snapshot_dirs, data_dir: Path | str, *, revision_decisions=None, review_token=None) -> Path:
     """Verify snapshots, merge them conservatively, and publish a new dataset."""
     paths = [Path(item).resolve() for item in snapshot_dirs]
     if not paths:
@@ -171,13 +171,20 @@ def assemble_dataset(snapshot_dirs, data_dir: Path | str) -> Path:
     if len(set(paths)) != len(paths):
         raise ValueError("duplicate snapshot paths")
     loaded = []
+    source_hashes = {}
     try:
         for path in paths:
+            try:
+                source_hashes[str(path)] = _sha256(path / "manifest.json")
+            except OSError:
+                raise DatasetError(f"snapshot {path.name}: manifest is missing or unreadable") from None
             manifest, games, stats = _load_verified(path, SNAPSHOT_SCHEMA, f"snapshot {path.name}")
             if manifest.get("offensive_plays_basis") != PLAY_COUNT_BASIS:
                 raise DatasetError(f"snapshot {path.name}: unsupported offensive-play basis")
             if not isinstance(manifest.get("started_at_utc"), str) or not isinstance(manifest.get("run_id"), str):
                 raise DatasetError(f"snapshot {path.name}: manifest lacks run identity")
+            if source_hashes[str(path)] != _sha256(path / "manifest.json"):
+                raise DatasetError("Snapshot changed during verification")
             loaded.append((
                 manifest, path, _index(games, ("game_id",), path.name),
                 _index(stats, ("game_id", "team_id"), path.name),
@@ -190,8 +197,18 @@ def assemble_dataset(snapshot_dirs, data_dir: Path | str) -> Path:
         raise DatasetError("snapshots share a run ID")
     loaded.sort(key=lambda item: (item[0]["started_at_utc"], item[0]["run_id"]))
 
+    merge_inputs = loaded
+    revision_audit = None
+    if revision_decisions is not None:
+        from .revisions import apply_review
+        merge_inputs, revision_audit = apply_review(
+            loaded, revision_decisions, review_token, _check_consistency,
+        )
+        revision_audit["approved_at_utc"] = _utc()
+    elif review_token is not None:
+        raise DatasetError("A review token requires explicit revision decisions")
     merged_games, merged_stats, upgraded = {}, {}, 0
-    for manifest, path, game_records, stat_records in loaded:
+    for manifest, path, game_records, stat_records in merge_inputs:
         for key, record in game_records.items():
             existing = merged_games.get(key)
             if existing is None or existing == record:
@@ -245,7 +262,7 @@ def assemble_dataset(snapshot_dirs, data_dir: Path | str) -> Path:
             "inputs": [
                 {
                     "run_id": item[0]["run_id"], "path": str(item[1]),
-                    "manifest_sha256": _sha256(item[1] / "manifest.json"),
+                    "manifest_sha256": source_hashes[str(item[1])],
                     "started_at_utc": item[0]["started_at_utc"], "scope": item[0].get("scope"),
                     "counts": item[0].get("counts"),
                 }
@@ -259,6 +276,11 @@ def assemble_dataset(snapshot_dirs, data_dir: Path | str) -> Path:
             "outputs": artifacts, "offensive_plays_basis": PLAY_COUNT_BASIS,
             "red_zone_policy": RED_ZONE_POLICY,
         }
+        if revision_audit is not None:
+            manifest["revisions"] = revision_audit
+        if any(_sha256(Path(path) / "manifest.json") != digest
+               for path, digest in source_hashes.items()):
+            raise DatasetError("Snapshot changed before publication; review again")
         _write_json(staging / "manifest.json", manifest)
         if output.exists():
             raise FileExistsError("dataset already exists")
@@ -334,3 +356,4 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
