@@ -14,7 +14,7 @@ from uuid import uuid4
 
 from cfb_power.config import Paths
 from cfb_power.ingestion.cfbd_canonical import PLAY_COUNT_BASIS, normalize_cfbd_canonical, normalize_games
-from cfb_power.ingestion.cfbd_client import CfbdClient
+from cfb_power.ingestion.cfbd_client import CfbdClient, CfbdHttpError
 from cfb_power.validation import DataValidationError
 
 
@@ -174,11 +174,14 @@ def ingest_cfbd_batch(
         if created_staging and staging.exists():
             shutil.rmtree(staging, ignore_errors=True)
         manifest.update(status="failed", failed_at_utc=_utc(), error_type=type(exc).__name__)
+        if isinstance(exc, CfbdHttpError):
+            manifest["http_error"] = {"status_code": exc.status_code, "endpoint": exc.endpoint}
         try:
             _write_json(audit, manifest)
         except OSError:
             pass
-        raise BatchIngestionError(f"Ingestion failed ({type(exc).__name__}); raw audit: {raw}") from None
+        detail = str(exc) if isinstance(exc, CfbdHttpError) else f"Ingestion failed ({type(exc).__name__})"
+        raise BatchIngestionError(f"{detail}; raw audit: {raw}") from None
 
 
 def main(argv=None) -> int:
