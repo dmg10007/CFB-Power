@@ -1,14 +1,23 @@
 """Minimal CollegeFootballData API client (standard library only)."""
-
 from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
 
 BASE_URL = "https://api.collegefootballdata.com"
+SAFE_ENDPOINTS = frozenset({"/games", "/games/teams", "/game/box/advanced", "/teams"})
+
+
+class CfbdHttpError(RuntimeError):
+    """Controlled HTTP diagnostics, without response bodies, URLs, or headers."""
+    def __init__(self, status_code: int, endpoint: str) -> None:
+        self.status_code = status_code if type(status_code) is int and 100 <= status_code <= 599 else 0
+        self.endpoint = endpoint if endpoint in SAFE_ENDPOINTS else "[redacted endpoint]"
+        super().__init__(f"CFBD request failed: HTTP {self.status_code}; endpoint {self.endpoint}")
 
 
 class CfbdClient:
@@ -21,15 +30,14 @@ class CfbdClient:
     def get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
         query = urllib.parse.urlencode(params or {})
         url = f"{BASE_URL}{path}" + (f"?{query}" if query else "")
-        request = urllib.request.Request(
-            url,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Accept": "application/json",
-            },
-        )
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+        request = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {self.api_key}", "Accept": "application/json",
+        })
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise CfbdHttpError(exc.code, path) from None
 
     def get_advanced_box(self, game_id: int) -> Any:
         return self.get_json("/game/box/advanced", {"id": game_id})
