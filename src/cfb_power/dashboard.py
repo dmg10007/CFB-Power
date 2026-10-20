@@ -9,9 +9,20 @@ from pathlib import Path
 
 
 def main():
+    import importlib
+    import sys
+
     import pandas as pd
     import streamlit as st
     from dotenv import dotenv_values
+
+    # Invalidate cached modules so code modifications take effect on page reload
+    for mod in ("cfb_power.power_ranking", "cfb_power.dashboard_power", "cfb_power.team_names"):
+        if mod in sys.modules:
+            try:
+                importlib.reload(sys.modules[mod])
+            except Exception:
+                pass
 
     from cfb_power.dashboard_power import (
         get_live_power_rankings,
@@ -45,6 +56,13 @@ def main():
     st.caption(
         "Opponent-adjusted Ridge ratings · situational efficiency analytics · weekly game forecasts"
     )
+
+    with st.sidebar:
+        st.markdown("### 🏈 Controls")
+        if st.button("🔄 Reload Data & Clear Cache"):
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            st.rerun()
 
     # Load power rankings and team names
     rankings_obj, rankings_df, team_names = get_live_power_rankings(data_dir)

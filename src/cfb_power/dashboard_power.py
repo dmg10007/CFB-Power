@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -12,18 +11,13 @@ from .power_ranking import MatchupComparison, PowerRankings, fit_power_rankings
 from .team_names import resolve_team_names
 
 
-@st.cache_data(show_spinner=False)
-def load_cached_power_rankings_data(
-    data_dir_str: str,
-) -> tuple[pd.DataFrame | None, dict[str, Any] | None]:
-    """Load active games and stats, fit power rankings, and cache the serialized table."""
-    data_dir = Path(data_dir_str)
+def _get_active_source_paths(data_dir: Path) -> tuple[Path | None, Path | None, float]:
+    """Find active games and stats CSV files and compute combined timestamp."""
     processed_dir = data_dir / "processed"
     games_csv = processed_dir / "games.csv"
     stats_csv = processed_dir / "team_game_stats.csv"
 
     if not games_csv.is_file() or not stats_csv.is_file():
-        # Fallback to latest dataset
         datasets_dir = data_dir / "datasets"
         if datasets_dir.is_dir():
             candidates = sorted(
@@ -36,7 +30,21 @@ def load_cached_power_rankings_data(
                 stats_csv = candidates[0] / "team_game_stats.csv"
 
     if not games_csv.is_file() or not stats_csv.is_file():
-        return None, None
+        return None, None, 0.0
+
+    mtime = max(games_csv.stat().st_mtime, stats_csv.stat().st_mtime)
+    return games_csv, stats_csv, mtime
+
+
+@st.cache_resource(show_spinner=False)
+def load_power_rankings_resource(
+    data_dir_str: str, source_mtime: float
+) -> tuple[PowerRankings | None, pd.DataFrame | None, dict[str | int, str]]:
+    """Load active games and stats, fit power rankings engine, and return DataFrame and names."""
+    data_dir = Path(data_dir_str)
+    games_csv, stats_csv, _ = _get_active_source_paths(data_dir)
+    if games_csv is None or stats_csv is None:
+        return None, None, {}
 
     try:
         games = pd.read_csv(games_csv)
@@ -44,29 +52,17 @@ def load_cached_power_rankings_data(
         names = resolve_team_names(data_dir)
         rankings = fit_power_rankings(games, stats, team_names=names)
         df = rankings.to_dataframe()
-        return df, {"rankings_object": rankings, "team_names": names}
+        return rankings, df, names
     except Exception:
-        return None, None
+        return None, None, {}
 
 
 def get_live_power_rankings(
     data_dir: Path,
 ) -> tuple[PowerRankings | None, pd.DataFrame | None, dict[str | int, str]]:
-    """Retrieve PowerRankings object and DataFrame."""
-    df, meta = load_cached_power_rankings_data(str(data_dir))
-    if meta is None or "rankings_object" not in meta:
-        # Re-compute if needed
-        processed_dir = data_dir / "processed"
-        games_csv = processed_dir / "games.csv"
-        stats_csv = processed_dir / "team_game_stats.csv"
-        if not games_csv.is_file() or not stats_csv.is_file():
-            return None, None, {}
-        games = pd.read_csv(games_csv)
-        stats = pd.read_csv(stats_csv)
-        names = resolve_team_names(data_dir)
-        rankings = fit_power_rankings(games, stats, team_names=names)
-        return rankings, rankings.to_dataframe(), names
-    return meta["rankings_object"], df, meta.get("team_names", {})
+    """Retrieve PowerRankings object, DataFrame, and team names."""
+    _, _, mtime = _get_active_source_paths(data_dir)
+    return load_power_rankings_resource(str(data_dir), mtime)
 
 
 def render_power_rankings_tab(
