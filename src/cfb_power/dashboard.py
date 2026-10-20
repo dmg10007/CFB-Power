@@ -18,6 +18,7 @@ def main():
     from cfb_power.upcoming import predict_upcoming
     from cfb_power.revisions import ReviewRequired, assemble_or_review
     from cfb_power.revisions_ui import render_review
+    from cfb_power.results_ui import render_results
 
     root = Path(__file__).resolve().parents[2]
     settings = dotenv_values(root / ".env")
@@ -28,8 +29,9 @@ def main():
     st.title("CFB Power")
     st.caption("Local dashboard · regular season · rolling-average forecasts")
     st.caption(f"Data folder: {data_dir}")
-    settings_tab, update_tab, forecasts_tab = st.tabs(["Settings", "Update & forecast", "Forecasts & history"])
-    busy = "job" in st.session_state and st.session_state.job[0].is_alive()
+    settings_tab, update_tab, forecasts_tab, results_tab = st.tabs(["Settings", "Update & forecast", "Forecasts & history", "Results Report"])
+    busy = any(name in st.session_state and st.session_state[name][0].is_alive()
+               for name in ("job", "report_job"))
     with settings_tab:
         st.warning("The key is stored as plaintext in your local .env, owner-readable only. Never share that file.")
         st.write("API key saved" if read_key(root) else "No API key configured")
@@ -128,6 +130,9 @@ def main():
                     st.dataframe(pd.read_csv(run / "skipped.csv"), width="stretch")
                 for name in ("predictions.csv", "skipped.csv", "upcoming_predictions.xlsx"):
                     st.download_button(f"Download {name}", (run / name).read_bytes(), file_name=name)
+
+    with results_tab:
+        render_results(root, data_dir, busy)
 
 
 if __name__ == "__main__":
