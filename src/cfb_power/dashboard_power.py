@@ -245,10 +245,10 @@ def render_matchup_analyzer_tab(
         return
 
     favored = comparison.favored_team_name
-    spread = comparison.projected_spread
+    spread = abs(comparison.projected_spread)
     win_prob = (
         comparison.team_a_win_probability
-        if comparison.favored_team == team_a_id
+        if comparison.projected_spread >= 0
         else comparison.team_b_win_probability
     )
 
@@ -258,7 +258,7 @@ def render_matchup_analyzer_tab(
     banner1.metric(
         "Projected Winner",
         f"🏆 {favored}",
-        f"-{spread:.1f} pts spread",
+        f"-{spread:.1f} pts spread" if spread >= 0.2 else "Pick'em",
     )
     banner2.metric(
         "Projected Score",

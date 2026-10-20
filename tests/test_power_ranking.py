@@ -221,3 +221,20 @@ def test_cli_power_rankings_and_compare(tmp_path, monkeypatch):
     assert "Tale of the Tape" in comp_res.output
     assert "TEAM_01" in comp_res.output
     assert "TEAM_02" in comp_res.output
+
+
+def test_compare_teams_with_individual_adjustments():
+    games, stats = make_sample_season_data(teams=4, weeks=4)
+    rankings = fit_power_rankings(games, stats)
+
+    # Base matchup
+    base = rankings.compare_teams("TEAM_01", "TEAM_02", neutral_site=True)
+
+    # Matchup with team_a_adj and team_b_adj
+    adj = rankings.compare_teams(
+        "TEAM_01", "TEAM_02", neutral_site=True, team_a_adj=3.5, team_b_adj=-2.0
+    )
+
+    assert adj.team_a_expected_points > base.team_a_expected_points
+    assert adj.team_b_expected_points < base.team_b_expected_points
+    assert adj.projected_spread > base.projected_spread

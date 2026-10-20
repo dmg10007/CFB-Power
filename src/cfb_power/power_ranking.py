@@ -123,6 +123,20 @@ class MatchupComparison:
             return f"{self.team_a.display_name} -{abs(self.projected_spread):.1f}"
         return f"{self.team_b.display_name} -{abs(self.projected_spread):.1f}"
 
+    @property
+    def favored_team_name(self) -> str:
+        if abs(self.projected_spread) < 0.2:
+            return "Even / Pick'em"
+        return self.team_a.display_name if self.projected_spread > 0 else self.team_b.display_name
+
+    @property
+    def team_a_profile(self) -> TeamPowerProfile:
+        return self.team_a
+
+    @property
+    def team_b_profile(self) -> TeamPowerProfile:
+        return self.team_b
+
 
 @dataclass
 class PowerRankings:
@@ -157,6 +171,8 @@ class PowerRankings:
         neutral_site: bool = False,
         home_team: str | int | None = None,
         roster_adjustments: dict[str | int, float] | None = None,
+        team_a_adj: float = 0.0,
+        team_b_adj: float = 0.0,
     ) -> MatchupComparison:
         """Compare any two teams and forecast score, spread, and statistical edges."""
         team_a = self.get_team(team_a_id)
@@ -176,8 +192,12 @@ class PowerRankings:
                 hfa_a = self.home_advantage
 
         # Apply optional player / QB / roster availability adjustments
-        adj_a = (roster_adjustments or {}).get(team_a.team_id, 0.0)
-        adj_b = (roster_adjustments or {}).get(team_b.team_id, 0.0)
+        adj_a = team_a_adj + (roster_adjustments or {}).get(
+            team_a.team_id, (roster_adjustments or {}).get(str(team_a.team_id), 0.0)
+        )
+        adj_b = team_b_adj + (roster_adjustments or {}).get(
+            team_b.team_id, (roster_adjustments or {}).get(str(team_b.team_id), 0.0)
+        )
 
         # Expected scores: League baseline + team offense - opponent defense + HFA/adjustments
         exp_a = max(
