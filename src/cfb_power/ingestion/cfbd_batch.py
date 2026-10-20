@@ -8,13 +8,12 @@ import json
 import os
 import shutil
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 from dotenv import load_dotenv
-
-load_dotenv()
 
 from cfb_power.config import Paths
 from cfb_power.ingestion.cfbd_canonical import (
@@ -24,6 +23,8 @@ from cfb_power.ingestion.cfbd_canonical import (
 )
 from cfb_power.ingestion.cfbd_client import CfbdClient, CfbdHttpError
 from cfb_power.validation import DataValidationError
+
+load_dotenv()
 
 
 class BatchIngestionError(RuntimeError):
@@ -92,6 +93,7 @@ def ingest_cfbd_batch(
     week: int | None = None,
     data_dir: Path | str,
     max_completed_games: int = 100,
+    delay_seconds: float = 0.25,
     client=None,
 ) -> Path:
     """Publish a new snapshot; never activate it or overwrite model input CSVs.
@@ -166,7 +168,9 @@ def ingest_cfbd_batch(
         if len(completed) > max_completed_games:
             raise DataValidationError("completed-game request limit exceeded")
         boxes = []
-        for game in completed:
+        for index, game in enumerate(completed):
+            if index > 0 and delay_seconds > 0:
+                time.sleep(delay_seconds)
             game_id = game["id"]
             response = capture("/games/teams", {"id": game_id}, f"box_{game_id}.json")
             if not isinstance(response, list) or len(response) != 1:
@@ -225,6 +229,13 @@ def main(argv=None) -> int:
     parser.add_argument("--season-type", choices=("regular", "postseason"), required=True)
     parser.add_argument("--week", type=int)
     parser.add_argument("--max-completed-games", type=int, default=100)
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.25,
+        dest="delay_seconds",
+        help="Delay between box requests (seconds)",
+    )
     parser.add_argument("--data-dir", type=Path, default=Paths().data_dir)
     args = parser.parse_args(argv)
     try:

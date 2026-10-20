@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -29,11 +30,14 @@ class CfbdHttpError(RuntimeError):
 
 
 class CfbdClient:
-    def __init__(self, api_key: str | None = None, timeout: float = 30.0) -> None:
+    def __init__(
+        self, api_key: str | None = None, timeout: float = 30.0, max_retries: int = 5
+    ) -> None:
         self.api_key = api_key or os.environ.get("CFBD_API_KEY")
         if not self.api_key:
             raise ValueError("CFBD API key missing: pass api_key or set CFBD_API_KEY")
         self.timeout = timeout
+        self.max_retries = max_retries
 
     def get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
         query = urllib.parse.urlencode(params or {})
@@ -45,11 +49,20 @@ class CfbdClient:
                 "Accept": "application/json",
             },
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            raise CfbdHttpError(exc.code, path) from None
+        for attempt in range(self.max_retries):
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                if exc.code == 429 and attempt < self.max_retries - 1:
+                    retry_header = exc.headers.get("Retry-After") if exc.headers else None
+                    if retry_header and retry_header.isdigit():
+                        wait_sec = float(retry_header)
+                    else:
+                        wait_sec = min(30.0, (2.0**attempt) * 1.5)
+                    time.sleep(wait_sec)
+                    continue
+                raise CfbdHttpError(exc.code, path) from None
 
     def get_advanced_box(self, game_id: int) -> Any:
         return self.get_json("/game/box/advanced", {"id": game_id})
