@@ -158,13 +158,16 @@ def run_sunday_update(
                 summary_df = pd.read_csv(summary_csv)
                 all_row = summary_df[summary_df["group"] == "all"]
                 if not all_row.empty:
+                    row_data = all_row.iloc[0]
                     eval_summary = {
-                        "games_in_scope": int(all_row["games"].iloc[0]),
-                        "scored": int(all_row["scored"].iloc[0]),
-                        "winner_accuracy": float(all_row["winner_accuracy"].iloc[0]),
-                        "margin_mae": float(all_row["margin_mae"].iloc[0]),
-                        "total_mae": float(all_row["total_mae"].iloc[0]),
-                        "brier_score": float(all_row["brier_score"].iloc[0]),
+                        "games_in_scope": int(
+                            row_data.get("games_scored", row_data.get("games", 0))
+                        ),
+                        "scored": int(row_data.get("games_scored", row_data.get("scored", 0))),
+                        "winner_accuracy": float(row_data.get("winner_accuracy", 0.0) or 0.0),
+                        "margin_mae": float(row_data.get("margin_mae", 0.0) or 0.0),
+                        "total_mae": float(row_data.get("total_mae", 0.0) or 0.0),
+                        "brier_score": float(row_data.get("brier_score", 0.0) or 0.0),
                     }
         except Exception as exc:
             logger(f"Live results report note: {exc}")
