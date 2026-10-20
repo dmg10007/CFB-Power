@@ -12,6 +12,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from cfb_power.config import Paths
 from cfb_power.ingestion.cfbd_canonical import (
     PLAY_COUNT_BASIS,
@@ -209,7 +213,7 @@ def ingest_cfbd_batch(
             pass
         detail = (
             str(exc)
-            if isinstance(exc, CfbdHttpError)
+            if isinstance(exc, (CfbdHttpError, DataValidationError, ValueError))
             else f"Ingestion failed ({type(exc).__name__})"
         )
         raise BatchIngestionError(f"{detail}; raw audit: {raw}") from None

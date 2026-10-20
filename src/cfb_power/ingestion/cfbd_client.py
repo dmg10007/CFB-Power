@@ -9,6 +9,10 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 BASE_URL = "https://api.collegefootballdata.com"
 SAFE_ENDPOINTS = frozenset({"/games", "/games/teams", "/game/box/advanced", "/teams"})
 
