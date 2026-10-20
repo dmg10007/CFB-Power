@@ -24,6 +24,7 @@ venv/
 /data/datasets/
 /data/runs/
 /data/reports/
+/data/rating_snapshots/
 /models/
 !data/.gitkeep
 !data/raw/.gitkeep
