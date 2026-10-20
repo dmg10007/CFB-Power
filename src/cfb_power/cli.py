@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import shutil
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import typer
@@ -13,18 +17,77 @@ from .exports import export_all
 from .features import build_matchup_features, build_team_pregame_features
 from .model import fit_score_models, predict_matchups
 from .power_ranking import fit_power_rankings
+from .upcoming import _team_names
 
 app = typer.Typer(add_completion=False, help="CFB Power V1 forecast pipeline")
 console = Console()
 
 
+def _find_dataset_names(dataset_dir: Path) -> dict[str | int, str]:
+    manifest_path = dataset_dir / "manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            return _team_names(manifest, [])
+        except Exception:
+            pass
+    return {}
+
+
+def _resolve_source_data(
+    pipeline_paths: Paths, dataset: str | None = None
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str | int, str]]:
+    """Resolve games, team stats, and team display names from dataset or processed dir."""
+    if dataset:
+        target = Path(dataset)
+        if not target.is_dir():
+            target = pipeline_paths.data_dir / "datasets" / dataset
+        if not (target / "games.csv").exists() or not (target / "team_game_stats.csv").exists():
+            raise typer.BadParameter(f"Dataset directory not found: {dataset}")
+        games = pd.read_csv(target / "games.csv")
+        stats = pd.read_csv(target / "team_game_stats.csv")
+        names = _find_dataset_names(target)
+        return games, stats, names
+
+    if pipeline_paths.games_csv.exists() and pipeline_paths.team_game_stats_csv.exists():
+        games = pd.read_csv(pipeline_paths.games_csv)
+        stats = pd.read_csv(pipeline_paths.team_game_stats_csv)
+        names: dict[str | int, str] = {}
+        datasets_dir = pipeline_paths.data_dir / "datasets"
+        if datasets_dir.exists():
+            candidates = sorted(
+                datasets_dir.glob("*/manifest.json"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if candidates:
+                names = _find_dataset_names(candidates[0].parent)
+        return games, stats, names
+
+    # Fallback to latest dataset if active processed dir is unpopulated
+    datasets_dir = pipeline_paths.data_dir / "datasets"
+    if datasets_dir.exists():
+        candidates = sorted(
+            [d for d in datasets_dir.iterdir() if d.is_dir() and (d / "games.csv").exists()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            latest = candidates[0]
+            games = pd.read_csv(latest / "games.csv")
+            stats = pd.read_csv(latest / "team_game_stats.csv")
+            names = _find_dataset_names(latest)
+            return games, stats, names
+
+    raise typer.BadParameter(
+        "Missing normalized source data. Run create-demo-data or capture a CFBD dataset."
+    )
+
+
 def _load_source(pipeline_paths: Paths) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load normalized games and team game statistics CSVs."""
-    if not pipeline_paths.games_csv.exists() or not pipeline_paths.team_game_stats_csv.exists():
-        raise typer.BadParameter(
-            "Missing normalized source data. Run create-demo-data or add CSV files."
-        )
-    return pd.read_csv(pipeline_paths.games_csv), pd.read_csv(pipeline_paths.team_game_stats_csv)
+    games, stats, _ = _resolve_source_data(pipeline_paths)
+    return games, stats
 
 
 @app.command()
@@ -155,16 +218,58 @@ def export_workbook() -> None:
 
 
 @app.command()
+def activate_dataset(
+    dataset: str = typer.Argument(
+        None,
+        help="Dataset ID or directory to activate into data/processed/. If omitted, uses latest verified dataset.",
+    ),
+) -> None:
+    """Copy an assembled dataset into active data/processed/ for pipeline training."""
+    paths = Paths()
+    paths.ensure()
+    datasets_dir = paths.data_dir / "datasets"
+
+    if dataset:
+        target = Path(dataset)
+        if not target.is_dir():
+            target = datasets_dir / dataset
+    else:
+        if not datasets_dir.exists():
+            raise typer.BadParameter("No datasets directory found.")
+        candidates = sorted(
+            [d for d in datasets_dir.iterdir() if d.is_dir() and (d / "games.csv").exists()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not candidates:
+            raise typer.BadParameter("No verified datasets found to activate.")
+        target = candidates[0]
+
+    if not (target / "games.csv").exists() or not (target / "team_game_stats.csv").exists():
+        raise typer.BadParameter(f"Dataset incomplete or not found: {target}")
+
+    shutil.copy2(target / "games.csv", paths.games_csv)
+    shutil.copy2(target / "team_game_stats.csv", paths.team_game_stats_csv)
+    console.print(f"[green]Activated dataset into processed directory:[/] {target.name}")
+
+
+@app.command()
 def power_rankings(
     top: int = typer.Option(25, min=1, help="Number of teams to display"),
     season: int | None = typer.Option(None, help="Filter to specific season"),
+    dataset: str | None = typer.Option(
+        None,
+        "--dataset",
+        "-d",
+        help="Optional dataset ID or path (defaults to active data or latest dataset)",
+    ),
 ) -> None:
     """Compute and display opponent-adjusted CFB Power Rankings."""
     paths = Paths()
-    games, stats = _load_source(paths)
+    games, stats, names = _resolve_source_data(paths, dataset=dataset)
     if season is not None:
         games = games[games["season"] == season]
-    rankings = fit_power_rankings(games, stats)
+    rankings = fit_power_rankings(games, stats, team_names=names)
     df = rankings.to_dataframe()
 
     table = Table(
@@ -214,11 +319,17 @@ def compare(
         "-h",
         help="Explicit home team (defaults to Team A if not neutral)",
     ),
+    dataset: str | None = typer.Option(
+        None,
+        "--dataset",
+        "-d",
+        help="Optional dataset ID or path (defaults to active data or latest dataset)",
+    ),
 ) -> None:
     """Compare any two teams head-to-head and project score, spread, and statistical edges."""
     paths = Paths()
-    games, stats = _load_source(paths)
-    rankings = fit_power_rankings(games, stats)
+    games, stats, names = _resolve_source_data(paths, dataset=dataset)
+    rankings = fit_power_rankings(games, stats, team_names=names)
 
     try:
         comparison = rankings.compare_teams(
