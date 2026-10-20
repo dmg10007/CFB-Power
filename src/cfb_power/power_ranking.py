@@ -152,7 +152,7 @@ class PowerRankings:
     league_points: float = DEFAULT_LEAGUE_POINTS
     margin_std: float = DEFAULT_MARGIN_STD
 
-    def get_team(self, team_id: str | int) -> TeamPowerProfile:
+    def get_team(self, team_id: str | int, allow_fallback: bool = True) -> TeamPowerProfile:
         if team_id in self.teams:
             return self.teams[team_id]
         # Match by string representation or display name
@@ -161,6 +161,17 @@ class PowerRankings:
                 team.team_name and team.team_name.lower() == str(team_id).lower()
             ):
                 return team
+        if allow_fallback:
+            return TeamPowerProfile(
+                team_id=team_id,
+                team_name=str(team_id),
+                rank=len(self.teams) + 1,
+                tier="Average",
+                power_rating=0.0,
+                offensive_rating=0.0,
+                defensive_rating=0.0,
+                strength_of_schedule=0.0,
+            )
         raise KeyError(f"Team '{team_id}' not found in power rankings.")
 
     def to_dataframe(self) -> pd.DataFrame:

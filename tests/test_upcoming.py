@@ -149,7 +149,12 @@ def test_forecasts_match_the_walk_forward_rolling_average_exactly(tmp_path):
     expected = full[full["period"] == "2026 regular week 6"].set_index("game_id")
     up_games, up_stats = make_upcoming(games, stats)
     as_of = week_kickoff(games, 6) - pd.Timedelta(days=1)
-    run = predict_upcoming(write_dataset(tmp_path, up_games, up_stats, "up"), tmp_path, as_of=as_of)
+    run = predict_upcoming(
+        write_dataset(tmp_path, up_games, up_stats, "up"),
+        tmp_path,
+        as_of=as_of,
+        model="rolling_average",
+    )
     actual = pd.read_csv(run / "predictions.csv").set_index("game_id")
     assert len(actual) == 8 and set(actual.index) == set(expected.index)
     expected = expected.loc[actual.index]
@@ -172,7 +177,12 @@ def test_outputs_manifest_and_workbook_are_written_without_touching_the_dataset(
     up_games, up_stats = make_upcoming(games, stats)
     dataset = write_dataset(tmp_path, up_games, up_stats)
     before = {path: sha(path) for path in dataset.iterdir()}
-    run = predict_upcoming(dataset, tmp_path, as_of=week_kickoff(games, 6) - pd.Timedelta(days=1))
+    run = predict_upcoming(
+        dataset,
+        tmp_path,
+        as_of=week_kickoff(games, 6) - pd.Timedelta(days=1),
+        model="rolling_average",
+    )
     manifest = json.loads((run / "manifest.json").read_text())
     assert run.parent == tmp_path / "runs" / "ds1" and run.name.startswith("predictions_")
     assert manifest["model"] == "rolling_average" and manifest["counts"]["predicted"] == 8
@@ -182,6 +192,27 @@ def test_outputs_manifest_and_workbook_are_written_without_touching_the_dataset(
     assert workbook.sheetnames == ["README", "Predictions"]
     assert workbook["Predictions"].max_row == 9
     assert {path: sha(path) for path in dataset.iterdir()} == before
+
+
+def test_predict_upcoming_with_power_rankings_model(tmp_path):
+    games, stats = make_tables()
+    up_games, up_stats = make_upcoming(games, stats)
+    dataset = write_dataset(tmp_path, up_games, up_stats)
+    run = predict_upcoming(
+        dataset,
+        tmp_path,
+        as_of=week_kickoff(games, 6) - pd.Timedelta(days=1),
+        model="power_rankings",
+    )
+    manifest = json.loads((run / "manifest.json").read_text())
+    assert manifest["model"] == "power_rankings_v1"
+    preds = pd.read_csv(run / "predictions.csv")
+    assert len(preds) == 8
+    assert "confidence_tier" in preds.columns
+    assert "home_score_low" in preds.columns
+    assert "home_score_high" in preds.columns
+    assert "projected_spread_home" in preds.columns
+    assert "projected_total" in preds.columns
 
 
 def test_games_that_have_started_are_skipped_with_a_reason(tmp_path):

@@ -69,20 +69,23 @@ def main():
     if not team_names:
         team_names = resolve_team_names(data_dir)
 
-    rankings_tab, matchup_tab, forecasts_tab, results_tab, update_tab, settings_tab = st.tabs(
-        [
-            "🏆 Power Rankings",
-            "⚔️ Matchup Analyzer",
-            "📈 Weekly Forecasts",
-            "📊 Results Report",
-            "🔄 Ingestion & Revisions",
-            "⚙️ Settings",
-        ]
+    rankings_tab, matchup_tab, forecasts_tab, sunday_tab, results_tab, update_tab, settings_tab = (
+        st.tabs(
+            [
+                "🏆 Power Rankings",
+                "⚔️ Matchup Analyzer",
+                "📈 Weekly Forecasts",
+                "🔄 Sunday Weekly Update",
+                "📊 Results Report",
+                "📥 Ingestion & Revisions",
+                "⚙️ Settings",
+            ]
+        )
     )
 
     busy = any(
         name in st.session_state and st.session_state[name][0].is_alive()
-        for name in ("job", "report_job")
+        for name in ("job", "report_job", "sunday_job")
     )
 
     with rankings_tab:
@@ -260,6 +263,117 @@ def main():
                             (run / "upcoming_predictions.xlsx").read_bytes(),
                             file_name="upcoming_predictions.xlsx",
                         )
+
+    with sunday_tab:
+        st.subheader("🔄 Sunday Weekly Model Update & Calibration")
+        st.caption(
+            "Execute the end-to-end Sunday cycle: evaluate completed week forecasts vs actual scores, "
+            "calibrate model parameters, update Power Rankings, and generate the next week's slate forecasts."
+        )
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            u_season = int(
+                st.number_input(
+                    "Season", min_value=2000, max_value=2100, value=2026, key="sunday_season"
+                )
+            )
+        with col2:
+            u_comp = int(
+                st.number_input(
+                    "Completed Week", min_value=1, max_value=25, value=7, key="sunday_comp"
+                )
+            )
+        with col3:
+            u_next = int(
+                st.number_input(
+                    "Upcoming Week to Forecast",
+                    min_value=1,
+                    max_value=25,
+                    value=8,
+                    key="sunday_next",
+                )
+            )
+
+        if st.button(
+            "🚀 Run Sunday Model Update & Forecast", disabled=busy, key="btn_sunday_update"
+        ):
+            events = queue.Queue()
+            secret = read_key(root)
+
+            def update_worker():
+                try:
+                    from cfb_power.weekly_update import run_sunday_update
+
+                    res = run_sunday_update(
+                        data_dir=data_dir,
+                        season=u_season,
+                        completed_week=u_comp,
+                        upcoming_week=u_next,
+                        api_key=secret if secret else None,
+                        emit=lambda m: events.put(("log", m)),
+                    )
+                    events.put(("done", res))
+                except Exception as exc:
+                    events.put(("error", str(exc)))
+
+            thread = threading.Thread(target=update_worker, daemon=True)
+            st.session_state.sunday_job = (thread, events)
+            st.session_state.sunday_messages = []
+            thread.start()
+            st.rerun()
+
+        if "sunday_job" in st.session_state:
+            thread, events = st.session_state.sunday_job
+            while True:
+                try:
+                    kind, message = events.get_nowait()
+                    if kind == "done":
+                        st.session_state.sunday_result = message
+                        st.session_state.sunday_messages.append(
+                            ("done", "Sunday update cycle finished successfully!")
+                        )
+                    else:
+                        st.session_state.sunday_messages.append((kind, message))
+                except queue.Empty:
+                    break
+
+            for kind, message in st.session_state.sunday_messages:
+                if kind == "error":
+                    st.error(message)
+                elif kind == "done":
+                    st.success(message)
+                else:
+                    st.write(f"• {message}")
+
+            if thread.is_alive():
+                st.caption("Running Sunday update and calibration...")
+                time.sleep(1)
+                st.rerun()
+
+        if "sunday_result" in st.session_state:
+            res = st.session_state.sunday_result
+            st.markdown("---")
+            st.subheader(f"📊 Week {res.completed_week} Performance vs Actual Results")
+            if res.evaluation and "winner_accuracy" in res.evaluation:
+                ev = res.evaluation
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Winner Accuracy", f"{ev.get('winner_accuracy', 0.0):.1%}")
+                c2.metric("Margin MAE", f"{ev.get('margin_mae', 0.0):.1f} pts")
+                c3.metric("Total MAE", f"{ev.get('total_mae', 0.0):.1f} pts")
+                c4.metric("Brier Score", f"{ev.get('brier_score', 0.0):.3f}")
+            else:
+                st.info("No prior forecasts recorded for this week; score evaluation skipped.")
+
+            st.subheader("⚙️ Model Calibration Updates")
+            cal = res.calibration
+            cc1, cc2, cc3 = st.columns(3)
+            cc1.metric("Calibrated Home Advantage", f"+{cal.get('calibrated_hfa', 2.5):.2f} pts")
+            cc2.metric("Margin Residual Std", f"{cal.get('margin_std', 13.5):.2f}")
+            cc3.metric("Season Games Sample", f"{cal.get('sample_size', 0)}")
+
+            st.success(
+                f"Week {res.upcoming_week} forecasts published to {res.forecast_dir.name} and exported to Excel workbook!"
+            )
 
     with results_tab:
         render_results(root, data_dir, busy)

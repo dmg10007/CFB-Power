@@ -120,7 +120,7 @@ def enrich_predictions_frame(
             .replace("", "Unknown")
         )
     elif "home_team" in df.columns:
-        # Fill any missing values in existing home_team
+        df["home_team"] = df["home_team"].astype(object)
         missing_mask = df["home_team"].isna() | (df["home_team"] == "")
         if missing_mask.any() and "home_team_id" in df.columns:
             df.loc[missing_mask, "home_team"] = (
@@ -137,6 +137,7 @@ def enrich_predictions_frame(
             .replace("", "Unknown")
         )
     elif "away_team" in df.columns:
+        df["away_team"] = df["away_team"].astype(object)
         missing_mask = df["away_team"].isna() | (df["away_team"] == "")
         if missing_mask.any() and "away_team_id" in df.columns:
             df.loc[missing_mask, "away_team"] = (

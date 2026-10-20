@@ -382,5 +382,76 @@ def compare(
     console.print(table)
 
 
+@app.command(name="sunday-update")
+@app.command(name="weekly-update")
+def sunday_update(
+    season: int = typer.Option(2026, "--season", "-s", help="Season year"),
+    completed_week: int = typer.Option(
+        ..., "--completed-week", "-c", help="Week that just finished"
+    ),
+    upcoming_week: int = typer.Option(
+        ..., "--upcoming-week", "-u", help="Upcoming week to forecast"
+    ),
+    api_key: str | None = typer.Option(
+        None, "--api-key", "-k", envvar="CFBD_API_KEY", help="CFBD API key"
+    ),
+    min_history: int = typer.Option(3, "--min-history", help="Minimum prior games threshold"),
+) -> None:
+    """Execute Sunday model evaluation, adaptive calibration, and next week's power ranking forecasts."""
+    from .weekly_update import run_sunday_update
+
+    paths = Paths()
+    console.print(f"[bold green]Starting Sunday update cycle for Season {season}...[/]")
+    result = run_sunday_update(
+        data_dir=paths.data_dir,
+        season=season,
+        completed_week=completed_week,
+        upcoming_week=upcoming_week,
+        api_key=api_key,
+        emit=lambda msg: console.print(f"  [cyan]•[/] {msg}"),
+        min_history_games=min_history,
+    )
+
+    # Display evaluation summary
+    if result.evaluation:
+        ev = result.evaluation
+        eval_text = (
+            f"Games Evaluated: [bold]{ev.get('scored', 0)}[/] of {ev.get('games_in_scope', 0)}\n"
+            f"Winner Accuracy: [bold green]{ev.get('winner_accuracy', 0.0):.1%}[/]\n"
+            f"Margin MAE: [bold yellow]{ev.get('margin_mae', 0.0):.1f} pts[/] | Total MAE: [bold]{ev.get('total_mae', 0.0):.1f} pts[/]\n"
+            f"Brier Calibration: [bold]{ev.get('brier_score', 0.0):.3f}[/] | Margin Bias: [bold]{ev.get('margin_bias', 0.0):+.1f} pts[/]"
+        )
+    else:
+        eval_text = "No previous pregame forecasts found for evaluation; skipped score comparison."
+    console.print(Panel(eval_text, title=f"Week {completed_week} Model Evaluation", expand=False))
+
+    # Display calibration
+    cal = result.calibration
+    cal_text = (
+        f"Calibrated Home-Field Advantage: [bold green]+{cal.get('calibrated_hfa', 2.5):.2f} pts[/] "
+        f"(Actual Season Avg: {cal.get('actual_home_margin_avg', 2.5):+.2f})\n"
+        f"Calibrated Margin Residual Std: [bold]{cal.get('margin_std', 13.5):.2f}[/]\n"
+        f"Ranked FBS Teams: [bold]{result.rankings_count}[/] across all conferences"
+    )
+    console.print(Panel(cal_text, title="Adaptive Model Calibration", expand=False))
+
+    # Top teams table
+    table = Table(
+        title="Updated Power Rankings (Top 10)", show_header=True, header_style="bold magenta"
+    )
+    table.add_column("Rank", justify="center")
+    table.add_column("Team", style="bold")
+    table.add_column("Rating", justify="right")
+    table.add_column("Tier", justify="center")
+    for t in result.top_teams:
+        table.add_row(
+            str(t["rank"]), str(t["team_name"]), f"{t['power_rating']:+.2f}", str(t["tier"])
+        )
+    console.print(table)
+
+    console.print(f"[bold green]✓ Week {upcoming_week} forecasts ready:[/] {result.forecast_dir}")
+    console.print(f"[bold green]✓ Updated Excel workbook:[/] {result.workbook_path}")
+
+
 if __name__ == "__main__":
     app()
