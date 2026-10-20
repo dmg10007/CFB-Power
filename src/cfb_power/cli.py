@@ -396,6 +396,11 @@ def sunday_update(
         None, "--api-key", "-k", envvar="CFBD_API_KEY", help="CFBD API key"
     ),
     min_history: int = typer.Option(3, "--min-history", help="Minimum prior games threshold"),
+    offline: bool = typer.Option(
+        False,
+        "--offline",
+        help="Run offline using existing downloaded dataset without CFBD API calls",
+    ),
 ) -> None:
     """Execute Sunday model evaluation, adaptive calibration, and next week's power ranking forecasts."""
     from .weekly_update import run_sunday_update
@@ -410,6 +415,7 @@ def sunday_update(
         api_key=api_key,
         emit=lambda msg: console.print(f"  [cyan]•[/] {msg}"),
         min_history_games=min_history,
+        offline=offline,
     )
 
     # Display evaluation summary

@@ -48,10 +48,11 @@ def run_sunday_update(
     emit: Callable[[str], None] | None = None,
     client: CfbdClient | None = None,
     min_history_games: int = 3,
+    offline: bool = False,
 ) -> SundayUpdateResult:
     """Execute the full Sunday update cycle:
 
-    1. Ingest completed week's scores & box stats and upcoming week's schedule (if API key provided)
+    1. Ingest completed week's scores & box stats and upcoming week's schedule (if API key provided and not offline)
     2. Assemble and activate the verified dataset
     3. Evaluate previous pregame forecasts against actual outcomes (Accuracy, MAE, Brier)
     4. Calibrate model parameters (empirical HFA, residual error scale) and refit Power Rankings
@@ -64,29 +65,53 @@ def run_sunday_update(
     logger = emit or (lambda msg: None)
 
     # 1. Ingestion & Dataset Assembly
-    if api_key or client:
+    dataset_dir: Path | None = None
+    if not offline and (api_key or client):
         if client is None:
             client = CfbdClient(api_key=api_key)  # type: ignore[arg-type]
-        logger(f"Ingesting completed Week {completed_week} results and box scores...")
-        ingest_cfbd_batch(
-            season=season,
-            season_type="regular",
-            week=completed_week,
-            data_dir=data_path,
-            client=client,
-        )
-        logger(f"Ingesting upcoming Week {upcoming_week} schedule...")
-        ingest_cfbd_batch(
-            season=season,
-            season_type="regular",
-            week=upcoming_week,
-            data_dir=data_path,
-            client=client,
-        )
-        logger("Assembling verified dataset snapshots...")
-        snapshots = discover_snapshots(data_path)
-        dataset_dir = assemble_or_review(snapshots, data_path)
-    else:
+        try:
+            logger(f"Ingesting completed Week {completed_week} results and box scores...")
+            ingest_cfbd_batch(
+                season=season,
+                season_type="regular",
+                week=completed_week,
+                data_dir=data_path,
+                client=client,
+            )
+            logger(f"Ingesting upcoming Week {upcoming_week} schedule...")
+            ingest_cfbd_batch(
+                season=season,
+                season_type="regular",
+                week=upcoming_week,
+                data_dir=data_path,
+                client=client,
+            )
+            logger("Assembling verified dataset snapshots...")
+            snapshots = discover_snapshots(data_path)
+            dataset_dir = assemble_or_review(snapshots, data_path)
+        except Exception as exc:
+            logger(f"⚠️ Live ingestion failed: {exc}")
+            datasets_dir = data_path / "datasets"
+            candidates = (
+                sorted(
+                    [
+                        d
+                        for d in datasets_dir.iterdir()
+                        if d.is_dir() and (d / "games.csv").is_file()
+                    ],
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                if datasets_dir.is_dir()
+                else []
+            )
+            if candidates:
+                logger(f"Falling back to existing local dataset: {candidates[0].name}")
+                dataset_dir = candidates[0]
+            else:
+                raise
+
+    if dataset_dir is None:
         # Offline mode: use latest verified dataset or processed data
         datasets_dir = data_path / "datasets"
         candidates = (

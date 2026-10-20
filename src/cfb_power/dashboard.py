@@ -294,6 +294,13 @@ def main():
                 )
             )
 
+        u_offline = st.checkbox(
+            "Offline Mode (Use existing downloaded dataset; skip CFBD API calls)",
+            value=False,
+            key="sunday_offline",
+            help="Enable this to calibrate and forecast using previously saved snapshots without making live CFBD API requests.",
+        )
+
         if st.button(
             "🚀 Run Sunday Model Update & Forecast", disabled=busy, key="btn_sunday_update"
         ):
@@ -311,6 +318,7 @@ def main():
                         upcoming_week=u_next,
                         api_key=secret if secret else None,
                         emit=lambda m: events.put(("log", m)),
+                        offline=u_offline,
                     )
                     events.put(("done", res))
                 except Exception as exc:
@@ -340,6 +348,11 @@ def main():
             for kind, message in st.session_state.sunday_messages:
                 if kind == "error":
                     st.error(message)
+                    if "429" in message or "quota exceeded" in message.lower():
+                        st.info(
+                            "💡 **CFBD API Monthly Quota Exceeded**: Your CFBD account has hit its monthly request quota. "
+                            "Check **'Offline Mode'** above to run the calibration and forecasts using your existing downloaded dataset."
+                        )
                 elif kind == "done":
                     st.success(message)
                 else:
