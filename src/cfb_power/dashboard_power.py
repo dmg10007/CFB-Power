@@ -288,6 +288,12 @@ def render_matchup_analyzer_tab(
 
     prof_a = comparison.team_a_profile
     prof_b = comparison.team_b_profile
+    top_a = getattr(
+        prof_a, "time_of_possession_min", getattr(prof_a, "time_of_possession_sec", 0.0) / 60.0
+    )
+    top_b = getattr(
+        prof_b, "time_of_possession_min", getattr(prof_b, "time_of_possession_sec", 0.0) / 60.0
+    )
 
     tape_data = [
         {
@@ -380,11 +386,9 @@ def render_matchup_analyzer_tab(
         },
         {
             "Metric": "Time of Possession",
-            team_a_name: f"{prof_a.time_of_possession_min:.1f} min",
-            "Statistical Edge": f"👑 {team_a_name}"
-            if prof_a.time_of_possession_min > prof_b.time_of_possession_min
-            else f"👑 {team_b_name}",
-            team_b_name: f"{prof_b.time_of_possession_min:.1f} min",
+            team_a_name: f"{top_a:.1f} min",
+            "Statistical Edge": f"👑 {team_a_name}" if top_a > top_b else f"👑 {team_b_name}",
+            team_b_name: f"{top_b:.1f} min",
         },
     ]
 

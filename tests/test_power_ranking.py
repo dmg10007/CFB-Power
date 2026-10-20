@@ -238,3 +238,5 @@ def test_compare_teams_with_individual_adjustments():
     assert adj.team_a_expected_points > base.team_a_expected_points
     assert adj.team_b_expected_points < base.team_b_expected_points
     assert adj.projected_spread > base.projected_spread
+    assert base.team_a_profile.time_of_possession_min > 0.0
+    assert base.team_b_profile.time_of_possession_min > 0.0

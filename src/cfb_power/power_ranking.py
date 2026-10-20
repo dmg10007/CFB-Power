@@ -65,6 +65,10 @@ class TeamPowerProfile:
     def display_name(self) -> str:
         return self.team_name if self.team_name else str(self.team_id)
 
+    @property
+    def time_of_possession_min(self) -> float:
+        return round(self.time_of_possession_sec / 60.0, 1)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "rank": self.rank,
