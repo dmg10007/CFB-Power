@@ -1,6 +1,8 @@
 from unittest.mock import Mock
+
 import pytest
-from cfb_power.dashboard_service import read_key, save_key, refresh
+
+from cfb_power.dashboard_service import read_key, refresh, save_key
 
 
 def test_save_preserves_settings_and_is_private(tmp_path):
@@ -29,18 +31,49 @@ def test_reject_symlink(tmp_path):
 
 
 def test_capture_failure_stops_pipeline(tmp_path):
-    capture, discover, assemble, forecast = Mock(side_effect=RuntimeError("failed")), Mock(), Mock(), Mock()
+    capture, discover, assemble, forecast = (
+        Mock(side_effect=RuntimeError("failed")),
+        Mock(),
+        Mock(),
+        Mock(),
+    )
     with pytest.raises(RuntimeError):
-        refresh(data_dir=tmp_path, season=2026, weeks=[6, 7], key="fake", emit=Mock(),
-                capture=capture, discover=discover, assemble=assemble, forecast=forecast)
+        refresh(
+            data_dir=tmp_path,
+            season=2026,
+            weeks=[6, 7],
+            key="fake",
+            emit=Mock(),
+            capture=capture,
+            discover=discover,
+            assemble=assemble,
+            forecast=forecast,
+        )
     discover.assert_not_called()
     assemble.assert_not_called()
     forecast.assert_not_called()
 
 
 def test_pipeline_uses_returned_dataset(tmp_path):
-    capture, discover, assemble, forecast = Mock(), Mock(return_value=["snapshot"]), Mock(return_value="exact-dataset"), Mock(return_value="run")
-    assert refresh(data_dir=tmp_path, season=2026, weeks=[7, 6, 6], key="fake", emit=Mock(),
-                   capture=capture, discover=discover, assemble=assemble, forecast=forecast) == "run"
+    capture, discover, assemble, forecast = (
+        Mock(),
+        Mock(return_value=["snapshot"]),
+        Mock(return_value="exact-dataset"),
+        Mock(return_value="run"),
+    )
+    assert (
+        refresh(
+            data_dir=tmp_path,
+            season=2026,
+            weeks=[7, 6, 6],
+            key="fake",
+            emit=Mock(),
+            capture=capture,
+            discover=discover,
+            assemble=assemble,
+            forecast=forecast,
+        )
+        == "run"
+    )
     assert [call.kwargs["week"] for call in capture.call_args_list] == [6, 7]
     forecast.assert_called_once_with("exact-dataset", tmp_path)

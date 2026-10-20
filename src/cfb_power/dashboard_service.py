@@ -1,7 +1,9 @@
 """Local dashboard settings and workflow orchestration."""
-from pathlib import Path
+
 import os
 import tempfile
+from pathlib import Path
+
 from dotenv import dotenv_values, set_key
 
 
@@ -36,11 +38,11 @@ def refresh(*, data_dir, season, weeks, key, emit, capture, discover, assemble, 
     if not key:
         raise ValueError("Save an API key in Settings first.")
     from cfb_power.ingestion.cfbd_client import CfbdClient
+
     client = CfbdClient(api_key=key)
     for week in sorted(set(weeks)):
         emit(f"Capturing {season} regular season, week {week}")
-        capture(season=season, season_type="regular", week=week,
-                data_dir=data_dir, client=client)
+        capture(season=season, season_type="regular", week=week, data_dir=data_dir, client=client)
     emit("Verifying and assembling snapshots")
     dataset = assemble(discover(data_dir), data_dir)
     emit("Generating forecasts")

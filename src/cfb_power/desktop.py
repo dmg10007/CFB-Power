@@ -1,11 +1,11 @@
 """Linux-only, per-user launcher for an editable CFB Power checkout."""
+
 from __future__ import annotations
 
 import argparse
 import fcntl
 import hashlib
 import os
-from pathlib import Path
 import shutil
 import socket
 import stat
@@ -16,6 +16,7 @@ import tempfile
 import time
 import urllib.request
 import webbrowser
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -23,14 +24,16 @@ ROOT = Path(__file__).resolve().parents[2]
 def quote(value):
     text = str(value)
     if any(char in text for char in '\n\r\t%\\"`$='):
-        raise ValueError("Launcher paths cannot contain control characters or % \\ \" ` $ =.")
+        raise ValueError('Launcher paths cannot contain control characters or % \\ " ` $ =.')
     return '"' + text + '"'
 
 
 def python_path(root):
     path = Path(root) / ".venv/bin/python"
     if not path.is_file() or not os.access(path, os.X_OK):
-        raise ValueError("Project .venv/bin/python is missing. Create/install the virtual environment first.")
+        raise ValueError(
+            "Project .venv/bin/python is missing. Create/install the virtual environment first."
+        )
     return path.absolute()
 
 
@@ -39,13 +42,17 @@ def desktop_text(root, port=8501, stop=False):
     command = f"{quote(python_path(root))} {quote(root / 'src/cfb_power/desktop.py')}"
     title = "CFB Power - Stop" if stop else "CFB Power"
     action = "stop" if stop else "start"
-    text = (f"[Desktop Entry]\nType=Application\nName={title}\n"
-            "Comment=Local college football forecasts\nIcon=applications-science\n"
-            f"Exec={command} {action} --port {port}\nTerminal=false\nStartupNotify=false\n"
-            f"Categories=Education;Science;\nX-CFB-Power-Root={root}\n")
+    text = (
+        f"[Desktop Entry]\nType=Application\nName={title}\n"
+        "Comment=Local college football forecasts\nIcon=applications-science\n"
+        f"Exec={command} {action} --port {port}\nTerminal=false\nStartupNotify=false\n"
+        f"Categories=Education;Science;\nX-CFB-Power-Root={root}\n"
+    )
     if not stop:
-        text += ("Actions=Stop;\n\n[Desktop Action Stop]\nName=Stop dashboard\n"
-                 f"Exec={command} stop --port {port}\n")
+        text += (
+            "Actions=Stop;\n\n[Desktop Action Stop]\nName=Stop dashboard\n"
+            f"Exec={command} stop --port {port}\n"
+        )
     return text
 
 
@@ -59,11 +66,15 @@ def locations(desktop=False):
         executable = shutil.which("xdg-user-dir")
         folder = home / "Desktop"
         if executable:
-            result = subprocess.run([executable, "DESKTOP"], capture_output=True, text=True, timeout=5)
+            result = subprocess.run(
+                [executable, "DESKTOP"], capture_output=True, text=True, timeout=5
+            )
             if result.returncode == 0 and result.stdout.strip():
                 folder = Path(result.stdout.strip())
         if not folder.is_absolute() or not folder.is_dir():
-            raise ValueError("Desktop folder not found; install without --desktop for menu entries only.")
+            raise ValueError(
+                "Desktop folder not found; install without --desktop for menu entries only."
+            )
         paths.append(folder / "cfb-power.desktop")
     return paths
 
@@ -81,7 +92,7 @@ def install(root=ROOT, port=8501, desktop=False, remove=False):
             path.unlink(missing_ok=True)
         return paths
     contents = [desktop_text(root, port, path.name == "cfb-power-stop.desktop") for path in paths]
-    for path, content in zip(paths, contents):
+    for path, content in zip(paths, contents, strict=True):
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(prefix=".cfb-launcher-", dir=path.parent)
         try:
@@ -138,9 +149,17 @@ def healthy(port):
 
 
 def streamlit_command(root, port):
-    return [str(python_path(root)), "-m", "streamlit", "run", str(Path(root) / "src/cfb_power/dashboard.py"),
-            "--server.address=127.0.0.1", f"--server.port={port}", "--server.headless=true",
-            "--browser.gatherUsageStats=false"]
+    return [
+        str(python_path(root)),
+        "-m",
+        "streamlit",
+        "run",
+        str(Path(root) / "src/cfb_power/dashboard.py"),
+        "--server.address=127.0.0.1",
+        f"--server.port={port}",
+        "--server.headless=true",
+        "--browser.gatherUsageStats=false",
+    ]
 
 
 def stop_child(child):
@@ -162,14 +181,18 @@ def serve(child, listener, port, timeout=45):
             if not ready:
                 ready = healthy(port)
                 if not ready and time.monotonic() >= deadline:
-                    raise RuntimeError("Dashboard startup timed out; inspect the private launcher log.")
+                    raise RuntimeError(
+                        "Dashboard startup timed out; inspect the private launcher log."
+                    )
             if ready and open_pending:
                 if not webbrowser.open(f"http://127.0.0.1:{port}"):
-                    notify(f"Dashboard ready at http://127.0.0.1:{port}; open this URL in your browser.")
+                    notify(
+                        f"Dashboard ready at http://127.0.0.1:{port}; open this URL in your browser."
+                    )
                 open_pending = False
             try:
                 connection, _ = listener.accept()
-            except socket.timeout:
+            except TimeoutError:
                 continue
             with connection:
                 connection.settimeout(1)
@@ -198,16 +221,18 @@ def start(root=ROOT, port=8501):
     with os.fdopen(fd, "a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+        except BlockingIOError as err:
             for _ in range(20):
                 try:
                     control(directory, b"open")
                     return
                 except (FileNotFoundError, ConnectionRefusedError):
                     time.sleep(0.1)
-            raise RuntimeError("Launcher is busy starting; try again shortly.")
+            raise RuntimeError("Launcher is busy starting; try again shortly.") from err
         if not port_free(port):
-            raise RuntimeError(f"Port {port} is occupied. Stop the manually launched server first; it was not modified.")
+            raise RuntimeError(
+                f"Port {port} is occupied. Stop the manually launched server first; it was not modified."
+            )
         command = streamlit_command(root, port)
         sockpath = directory / "control.sock"
         sockpath.unlink(missing_ok=True)
@@ -219,13 +244,21 @@ def start(root=ROOT, port=8501):
         logfd = os.open(logfile, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
         os.fchmod(logfd, 0o600)
         print(f"Private server log: {logfile}")
-        with os.fdopen(logfd, "w") as log, socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        with (
+            os.fdopen(logfd, "w") as log,
+            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener,
+        ):
             listener.bind(str(sockpath))
             os.chmod(sockpath, 0o600)
             listener.listen(8)
             try:
-                child = subprocess.Popen(command, cwd=root, stdin=subprocess.DEVNULL,
-                                         stdout=log, stderr=subprocess.STDOUT)
+                child = subprocess.Popen(
+                    command,
+                    cwd=root,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                )
                 serve(child, listener, port)
             finally:
                 sockpath.unlink(missing_ok=True)
@@ -242,16 +275,22 @@ def notify(message):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Install/start/stop the Linux CFB Power desktop launcher")
+    parser = argparse.ArgumentParser(
+        description="Install/start/stop the Linux CFB Power desktop launcher"
+    )
     parser.add_argument("action", choices=("install", "uninstall", "start", "stop"))
     parser.add_argument("--port", type=int, default=8501)
-    parser.add_argument("--desktop", action="store_true", help="also install/remove a Desktop shortcut")
+    parser.add_argument(
+        "--desktop", action="store_true", help="also install/remove a Desktop shortcut"
+    )
     args = parser.parse_args(argv)
     if not sys.platform.startswith("linux") or not 1024 <= args.port <= 65535:
         parser.error("Linux and a port from 1024 to 65535 are required.")
     try:
         if args.action in ("install", "uninstall"):
-            for path in install(port=args.port, desktop=args.desktop, remove=args.action == "uninstall"):
+            for path in install(
+                port=args.port, desktop=args.desktop, remove=args.action == "uninstall"
+            ):
                 print(path)
         elif args.action == "start":
             start(port=args.port)

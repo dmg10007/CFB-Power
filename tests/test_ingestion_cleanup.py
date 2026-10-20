@@ -1,4 +1,5 @@
 """Offline HTTP diagnostics, probe validation, and ignore-rule tests."""
+
 import io
 import json
 import subprocess
@@ -7,16 +8,21 @@ from unittest.mock import Mock
 from urllib.error import HTTPError
 
 import pytest
+
+from cfb_power import probe
 from cfb_power.ingestion import cfbd_client as api
 from cfb_power.ingestion.cfbd_batch import BatchIngestionError, ingest_cfbd_batch
-from cfb_power import probe
 
 
 @pytest.mark.parametrize("status", [401, 403, 429, 503])
 def test_http_error_excludes_private_fields(monkeypatch, status):
-    error = HTTPError("https://example.invalid/?key=fake-private-key", status,
-                      "fake-private-key", {"Authorization": "Bearer fake-private-key"},
-                      io.BytesIO(b"private response body fake-private-key"))
+    error = HTTPError(
+        "https://example.invalid/?key=fake-private-key",
+        status,
+        "fake-private-key",
+        {"Authorization": "Bearer fake-private-key"},
+        io.BytesIO(b"private response body fake-private-key"),
+    )
     monkeypatch.setattr(api.urllib.request, "urlopen", Mock(side_effect=error))
     with pytest.raises(api.CfbdHttpError) as caught:
         api.CfbdClient(api_key="fake-private-key").get_json("/games", {"year": 2026})
@@ -27,7 +33,9 @@ def test_http_error_excludes_private_fields(monkeypatch, status):
     assert "private response body" not in str(caught.value)
 
 
-@pytest.mark.parametrize("endpoint", ["/games?key=fake-private-key", "https://example.invalid/fake-private-key"])
+@pytest.mark.parametrize(
+    "endpoint", ["/games?key=fake-private-key", "https://example.invalid/fake-private-key"]
+)
 def test_unknown_endpoints_are_redacted(endpoint):
     error = api.CfbdHttpError(403, endpoint)
     assert error.endpoint == "[redacted endpoint]"
@@ -59,12 +67,27 @@ def test_generic_prefix_cannot_expose_private_error(tmp_path):
 
 
 def payloads():
-    games = [{"id": 123, "completed": True, "season": 2026, "seasonType": "regular",
-              "homeClassification": "fbs", "awayClassification": "fbs", "homeId": 1, "awayId": 2}]
-    boxes = [{"id": 123, "teams": [
-        {"teamId": 1, "stats": [{"category": "thirdDownEff", "stat": "2-8"}]},
-        {"teamId": 2, "stats": [{"category": "thirdDownEff", "stat": "3-9"}]},
-    ]}]
+    games = [
+        {
+            "id": 123,
+            "completed": True,
+            "season": 2026,
+            "seasonType": "regular",
+            "homeClassification": "fbs",
+            "awayClassification": "fbs",
+            "homeId": 1,
+            "awayId": 2,
+        }
+    ]
+    boxes = [
+        {
+            "id": 123,
+            "teams": [
+                {"teamId": 1, "stats": [{"category": "thirdDownEff", "stat": "2-8"}]},
+                {"teamId": 2, "stats": [{"category": "thirdDownEff", "stat": "3-9"}]},
+            ],
+        }
+    ]
     return games, boxes, {"teams": {}}
 
 
@@ -105,7 +128,10 @@ def test_probe_rejects_invalid_box_before_advanced(tmp_path, case):
     assert not list((tmp_path / "data/probes/cfbd").glob("*/team_stats_*.json"))
 
 
-@pytest.mark.parametrize("args", [{"season": True}, {"season": 2026, "game_id": -1}, {"season": 2026, "season_type": "both"}])
+@pytest.mark.parametrize(
+    "args",
+    [{"season": True}, {"season": 2026, "game_id": -1}, {"season": 2026, "season_type": "both"}],
+)
 def test_probe_invalid_arguments_make_no_requests(tmp_path, args):
     client = Mock()
     with pytest.raises(ValueError):
@@ -143,8 +169,20 @@ def test_ignore_outputs_not_source(tmp_path):
     rules = Path(__file__).resolve().parents[1] / ".gitignore"
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / ".gitignore").write_text(rules.read_text())
-    ignored = ["data/probes/cfbd/payload.json", "data/datasets/a/games.csv",
-               "data/runs/a/predictions.csv", "src/cfb_power.egg-info/PKG-INFO", ".env"]
+    ignored = [
+        "data/probes/cfbd/payload.json",
+        "data/datasets/a/games.csv",
+        "data/runs/a/predictions.csv",
+        "src/cfb_power.egg-info/PKG-INFO",
+        ".env",
+    ]
     for path in ignored:
-        assert subprocess.run(["git", "-C", str(tmp_path), "check-ignore", "-q", path]).returncode == 0
-    assert subprocess.run(["git", "-C", str(tmp_path), "check-ignore", "-q", "scripts/probe_cfbd.py"]).returncode == 1
+        assert (
+            subprocess.run(["git", "-C", str(tmp_path), "check-ignore", "-q", path]).returncode == 0
+        )
+    assert (
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "check-ignore", "-q", "scripts/probe_cfbd.py"]
+        ).returncode
+        == 1
+    )

@@ -1,10 +1,12 @@
 """Offline Linux launcher tests; no real browser, Streamlit server, or API calls."""
+
 import os
 import struct
 import subprocess
 from unittest.mock import MagicMock, Mock
 
 import pytest
+
 from cfb_power import desktop as app
 
 
@@ -20,14 +22,17 @@ def checkout(tmp_path):
 
 def test_desktop_exec_preserves_venv_and_spaces(checkout):
     text = app.desktop_text(checkout)
-    assert f'Exec="{checkout}/.venv/bin/python" "{checkout}/src/cfb_power/desktop.py" start --port 8501' in text
+    assert (
+        f'Exec="{checkout}/.venv/bin/python" "{checkout}/src/cfb_power/desktop.py" start --port 8501'
+        in text
+    )
     assert "Terminal=false" in text and "Actions=Stop;" in text
     assert "[Desktop Action Stop]" in text
     assert " stop --port 8501" in text
     assert "-m streamlit" not in text
 
 
-@pytest.mark.parametrize("bad", ['a\nb', 'a%b', 'a"b', 'a$b', 'a`b', 'a\\b', 'a=b'])
+@pytest.mark.parametrize("bad", ["a\nb", "a%b", 'a"b', "a$b", "a`b", "a\\b", "a=b"])
 def test_reserved_paths_rejected(bad):
     with pytest.raises(ValueError):
         app.quote(bad)
@@ -72,7 +77,9 @@ def test_optional_desktop_uses_xdg_location(checkout, tmp_path, monkeypatch):
     desktop.mkdir()
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
     monkeypatch.setattr(app.shutil, "which", lambda _: "/usr/bin/xdg-user-dir")
-    monkeypatch.setattr(app.subprocess, "run", Mock(return_value=Mock(returncode=0, stdout=str(desktop) + "\n")))
+    monkeypatch.setattr(
+        app.subprocess, "run", Mock(return_value=Mock(returncode=0, stdout=str(desktop) + "\n"))
+    )
     paths = app.install(root=checkout, desktop=True)
     assert paths[-1] == desktop / "cfb-power.desktop"
     assert paths[-1].is_file()
@@ -135,7 +142,9 @@ def test_occupied_port_does_not_spawn_or_stop_process(tmp_path, monkeypatch):
 def connection(command, uid=None):
     conn = MagicMock()
     conn.__enter__.return_value = conn
-    conn.getsockopt.return_value = struct.pack("3i", 123, os.getuid() if uid is None else uid, os.getgid())
+    conn.getsockopt.return_value = struct.pack(
+        "3i", 123, os.getuid() if uid is None else uid, os.getgid()
+    )
     conn.recv.return_value = command
     return conn
 
@@ -193,7 +202,9 @@ def test_shutdown_escalates_only_for_owned_child():
     child.kill.assert_called_once()
 
 
-@pytest.mark.parametrize("status, body, expected", [(200, b"ok", True), (200, b"other", False), (404, b"ok", False)])
+@pytest.mark.parametrize(
+    "status, body, expected", [(200, b"ok", True), (200, b"other", False), (404, b"ok", False)]
+)
 def test_health_requires_streamlit_response(monkeypatch, status, body, expected):
     response = MagicMock()
     response.__enter__.return_value = response

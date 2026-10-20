@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 from openpyxl import Workbook
@@ -56,11 +56,15 @@ def export_all(
     wb.remove(wb.active)
     readme = wb.create_sheet("README")
     readme.append(["CFB Power V1 Export"])
-    readme.append(["Generated UTC", datetime.now(timezone.utc).isoformat()])
-    readme.append(["Purpose", "Excel-ready output package; connect dashboard tables to these sheets or CSVs."])
+    readme.append(["Generated UTC", datetime.now(UTC).isoformat()])
+    readme.append(
+        ["Purpose", "Excel-ready output package; connect dashboard tables to these sheets or CSVs."]
+    )
     readme.append(["Data rule", "All features are derived from games before the matchup date."])
     readme.append(["Model", "Two Ridge expected-score models with residual-based score intervals."])
-    readme.append(["Dashboard inputs", "Predictions, Team_Stats, Historical_Results, Model_Performance"])
+    readme.append(
+        ["Dashboard inputs", "Predictions, Team_Stats, Historical_Results, Model_Performance"]
+    )
     readme["A1"].font = Font(size=16, bold=True, color="FFFFFF")
     readme["A1"].fill = PatternFill("solid", fgColor="123047")
     readme.column_dimensions["A"].width = 22

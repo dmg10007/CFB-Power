@@ -3,7 +3,7 @@
 import copy
 import hashlib
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -25,14 +25,23 @@ TEAMS = list(range(101, 117))
 
 
 def make_game(game_id, week, home, away, completed=True, home_points=24, away_points=17):
-    kickoff = datetime(2026, 9, 5, 16, tzinfo=timezone.utc) + timedelta(days=7 * (week - 1))
+    kickoff = datetime(2026, 9, 5, 16, tzinfo=UTC) + timedelta(days=7 * (week - 1))
     return {
-        "id": game_id, "season": 2026, "week": week, "seasonType": "regular",
-        "startDate": kickoff.isoformat().replace("+00:00", "Z"), "startTimeTBD": False,
-        "completed": completed, "neutralSite": False,
-        "homeId": home, "homeTeam": f"Team {home}", "homeClassification": "fbs",
+        "id": game_id,
+        "season": 2026,
+        "week": week,
+        "seasonType": "regular",
+        "startDate": kickoff.isoformat().replace("+00:00", "Z"),
+        "startTimeTBD": False,
+        "completed": completed,
+        "neutralSite": False,
+        "homeId": home,
+        "homeTeam": f"Team {home}",
+        "homeClassification": "fbs",
         "homePoints": home_points if completed else None,
-        "awayId": away, "awayTeam": f"Team {away}", "awayClassification": "fbs",
+        "awayId": away,
+        "awayTeam": f"Team {away}",
+        "awayClassification": "fbs",
         "awayPoints": away_points if completed else None,
     }
 
@@ -46,16 +55,22 @@ def make_box(game, rng):
             "thirdDownEff": f"{int(rng.integers(2, 8))}-{int(rng.integers(9, 16))}",
             "completionAttempts": f"{int(attempts * 0.6)}-{attempts}",
             "rushingAttempts": str(int(rng.integers(20, 45))),
-            "totalYards": str(passing + rushing), "netPassingYards": str(passing),
+            "totalYards": str(passing + rushing),
+            "netPassingYards": str(passing),
             "rushingYards": str(rushing),
             "totalPenaltiesYards": f"{int(rng.integers(2, 10))}-{int(rng.integers(15, 90))}",
-            "turnovers": str(int(rng.integers(0, 4))), "possessionTime": "30:00",
+            "turnovers": str(int(rng.integers(0, 4))),
+            "possessionTime": "30:00",
         }
-        teams.append({
-            "teamId": game[f"{side}Id"], "team": game[f"{side}Team"], "homeAway": side,
-            "points": game[f"{side}Points"],
-            "stats": [{"category": name, "stat": value} for name, value in stats.items()],
-        })
+        teams.append(
+            {
+                "teamId": game[f"{side}Id"],
+                "team": game[f"{side}Team"],
+                "homeAway": side,
+                "points": game[f"{side}Points"],
+                "stats": [{"category": name, "stat": value} for name, value in stats.items()],
+            }
+        )
     return {"id": game["id"], "teams": teams}
 
 
@@ -74,7 +89,9 @@ def capture(tmp_path, games, week):
     client = Mock()
     boxes = [[make_box(game, rng)] for game in games if game["completed"]]
     client.get_json.side_effect = [games, *boxes]
-    return ingest_cfbd_batch(season=2026, season_type="regular", week=week, data_dir=tmp_path, client=client)
+    return ingest_cfbd_batch(
+        season=2026, season_type="regular", week=week, data_dir=tmp_path, client=client
+    )
 
 
 @pytest.fixture()
@@ -99,8 +116,12 @@ def test_assemble_verifies_merges_and_preserves_inputs(world):
     manifest = json.loads((dataset / "manifest.json").read_text())
     assert manifest["status"] == "ready"
     assert manifest["counts"] == {
-        "snapshots": 3, "games": 24, "completed_games": 24, "upcoming_games": 0,
-        "team_stat_rows": 48, "upcoming_replaced_by_completed": 0,
+        "snapshots": 3,
+        "games": 24,
+        "completed_games": 24,
+        "upcoming_games": 0,
+        "team_stat_rows": 48,
+        "upcoming_replaced_by_completed": 0,
     }
     assert [item["run_id"] for item in manifest["inputs"]] == [path.name for path in snapshots]
     for artifact in manifest["outputs"]:
@@ -118,7 +139,9 @@ def test_assemble_verifies_merges_and_preserves_inputs(world):
 def test_identical_recaptures_are_deduplicated(tmp_path):
     games = week_games(np.random.default_rng(3), 1)
     first, second = capture(tmp_path, games, 1), capture(tmp_path, copy.deepcopy(games), 1)
-    manifest = json.loads((assemble_dataset([first, second], tmp_path) / "manifest.json").read_text())
+    manifest = json.loads(
+        (assemble_dataset([first, second], tmp_path) / "manifest.json").read_text()
+    )
     assert manifest["counts"]["games"] == 8
     assert manifest["counts"]["team_stat_rows"] == 16
 
@@ -130,7 +153,9 @@ def test_completed_game_replaces_earlier_upcoming_record(tmp_path):
     for game in upcoming:
         game.update(completed=False, homePoints=None, awayPoints=None)
     first, second = capture(tmp_path, upcoming, 1), capture(tmp_path, completed, 1)
-    manifest = json.loads((assemble_dataset([first, second], tmp_path) / "manifest.json").read_text())
+    manifest = json.loads(
+        (assemble_dataset([first, second], tmp_path) / "manifest.json").read_text()
+    )
     assert manifest["counts"]["completed_games"] == 8
     assert manifest["counts"]["upcoming_games"] == 0
     assert manifest["counts"]["upcoming_replaced_by_completed"] == 8
@@ -190,9 +215,13 @@ def test_training_uses_explicit_dataset_and_writes_only_to_new_run(world):
     predictions = pd.read_csv(run / "exports" / "predictions.csv")
     assert len(predictions) == 24
     assert predictions["home_win_probability"].between(0, 1).all()
-    assert {"README", "Predictions", "Team_Stats", "Historical_Results", "Model_Performance"} == set(
-        load_workbook(run / "exports" / "cfb_forecast_export.xlsx", read_only=True).sheetnames
-    )
+    assert {
+        "README",
+        "Predictions",
+        "Team_Stats",
+        "Historical_Results",
+        "Model_Performance",
+    } == set(load_workbook(run / "exports" / "cfb_forecast_export.xlsx", read_only=True).sheetnames)
     assert {path: digest(path) for path in dataset.iterdir()} == before
     assert (active / "games.csv").read_text() == "existing games"
 

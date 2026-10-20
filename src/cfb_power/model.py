@@ -65,7 +65,9 @@ def predict_matchups(matchups: pd.DataFrame, models: ScoreModels) -> pd.DataFram
     result = matchups.copy()
     result["home_expected_points"] = models.home.predict(result[models.features]).clip(0, 70)
     result["away_expected_points"] = models.away.predict(result[models.features]).clip(0, 70)
-    result["projected_spread_home"] = result["home_expected_points"] - result["away_expected_points"]
+    result["projected_spread_home"] = (
+        result["home_expected_points"] - result["away_expected_points"]
+    )
     result["projected_total"] = result["home_expected_points"] + result["away_expected_points"]
     z = result["projected_spread_home"] / models.margin_residual_std
     result["home_win_probability"] = _normal_cdf(z)

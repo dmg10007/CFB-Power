@@ -14,8 +14,12 @@ def _safe_divide(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
 def _add_rate_metrics(stats: pd.DataFrame) -> pd.DataFrame:
     result = stats.copy()
     result["yards_per_play"] = _safe_divide(result["total_yards"], result["offensive_plays"])
-    result["passing_yards_per_play"] = _safe_divide(result["passing_yards"], result["offensive_plays"])
-    result["rushing_yards_per_play"] = _safe_divide(result["rushing_yards"], result["offensive_plays"])
+    result["passing_yards_per_play"] = _safe_divide(
+        result["passing_yards"], result["offensive_plays"]
+    )
+    result["rushing_yards_per_play"] = _safe_divide(
+        result["rushing_yards"], result["offensive_plays"]
+    )
     result["third_down_rate"] = _safe_divide(
         result["third_down_conversions"], result["third_down_attempts"]
     )
@@ -30,7 +34,9 @@ def build_team_pregame_features(games: pd.DataFrame, stats: pd.DataFrame) -> pd.
     games = validate_games(games)
     stats = validate_team_game_stats(stats, games)
     context = games[["game_id", "season", "week", "game_date", "completed"]]
-    team_games = _add_rate_metrics(stats).merge(context, on="game_id", how="inner", validate="many_to_one")
+    team_games = _add_rate_metrics(stats).merge(
+        context, on="game_id", how="inner", validate="many_to_one"
+    )
     team_games = team_games.sort_values(["team_id", "game_date", "game_id"]).copy()
 
     for metric in ROLLING_METRICS:
@@ -54,14 +60,16 @@ def build_matchup_features(games: pd.DataFrame, team_features: pd.DataFrame) -> 
     """Create one pregame row per fixture with home and away team feature prefixes."""
     games = validate_games(games)
     feature_columns = [
-        column
-        for column in team_features.columns
-        if column.endswith(("_l3", "_l5", "_season"))
+        column for column in team_features.columns if column.endswith(("_l3", "_l5", "_season"))
     ]
     home = team_features[["game_id", "team_id", *feature_columns]].copy()
     away = team_features[["game_id", "team_id", *feature_columns]].copy()
-    home = home.rename(columns={"team_id": "home_team_id", **{c: f"home_{c}" for c in feature_columns}})
-    away = away.rename(columns={"team_id": "away_team_id", **{c: f"away_{c}" for c in feature_columns}})
+    home = home.rename(
+        columns={"team_id": "home_team_id", **{c: f"home_{c}" for c in feature_columns}}
+    )
+    away = away.rename(
+        columns={"team_id": "away_team_id", **{c: f"away_{c}" for c in feature_columns}}
+    )
     matchups = games.merge(home, on=["game_id", "home_team_id"], how="left")
     matchups = matchups.merge(away, on=["game_id", "away_team_id"], how="left")
     matchups["home_field_indicator"] = (~matchups["neutral_site"].astype(bool)).astype(int)
