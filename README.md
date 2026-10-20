@@ -105,10 +105,17 @@ cfb-power --help
 # Generate synthetic demonstration dataset
 cfb-power create-demo-data --seasons 3 --teams 12 --weeks 10
 
+# View opponent-adjusted Power Rankings
+cfb-power power-rankings --top 25
+
+# Compare any two teams head-to-head (score, spread, win prob, and statistical edges)
+cfb-power compare TEAM_01 TEAM_02 --neutral
+cfb-power compare TEAM_01 TEAM_02 --home-team TEAM_01
+
 # Train model pipelines on completed matchups
 cfb-power train
 
-# Export predictions, metrics, and formatted Excel workbook
+# Export predictions, power rankings, metrics, and formatted Excel workbook
 cfb-power export-workbook
 ```
 

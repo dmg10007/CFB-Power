@@ -10,9 +10,10 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 
-from . import MODEL_VERSION
 from .config import Paths
 from .features import model_feature_columns
+
+MODEL_VERSION = "v1.0.0-baseline-ridge"
 
 
 @dataclass

@@ -45,6 +45,7 @@ def export_all(
     historical_results: pd.DataFrame,
     performance: pd.DataFrame,
     paths: Paths,
+    power_rankings: pd.DataFrame | None = None,
 ) -> None:
     """Export predictions, team statistics, and evaluation metrics to CSV and formatted Excel.
 
@@ -60,12 +61,16 @@ def export_all(
         Model evaluation metrics (accuracy, MAE, log loss, Brier score).
     paths : Paths
         Directory paths configuration for export destination.
+    power_rankings : pd.DataFrame | None, optional
+        Opponent-adjusted team power rankings table.
     """
     paths.ensure()
     predictions.to_csv(paths.predictions_csv, index=False)
     team_stats.to_csv(paths.team_stats_csv, index=False)
     historical_results.to_csv(paths.results_csv, index=False)
     performance.to_csv(paths.performance_csv, index=False)
+    if power_rankings is not None:
+        power_rankings.to_csv(paths.export_dir / "power_rankings.csv", index=False)
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -85,12 +90,16 @@ def export_all(
     readme.column_dimensions["A"].width = 22
     readme.column_dimensions["B"].width = 100
 
-    for sheet_name, frame in {
+    export_sheets: dict[str, pd.DataFrame] = {
         "Predictions": predictions,
         "Team_Stats": team_stats,
         "Historical_Results": historical_results,
         "Model_Performance": performance,
-    }.items():
+    }
+    if power_rankings is not None:
+        export_sheets["Power_Rankings"] = power_rankings
+
+    for sheet_name, frame in export_sheets.items():
         ws = wb.create_sheet(sheet_name)
         _write_dataframe(ws, frame)
         if sheet_name == "Predictions" and "home_win_probability" in frame.columns and len(frame):

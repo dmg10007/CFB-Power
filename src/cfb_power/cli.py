@@ -4,12 +4,15 @@ import numpy as np
 import pandas as pd
 import typer
 from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 from .config import Paths
 from .evaluation import evaluate_predictions
 from .exports import export_all
 from .features import build_matchup_features, build_team_pregame_features
 from .model import fit_score_models, predict_matchups
+from .power_ranking import fit_power_rankings
 
 app = typer.Typer(add_completion=False, help="CFB Power V1 forecast pipeline")
 console = Console()
@@ -124,7 +127,7 @@ def train() -> None:
 
 @app.command()
 def export_workbook() -> None:
-    """Write CSV and formatted XLSX exports from the latest predictions."""
+    """Write CSV and formatted XLSX exports from the latest predictions and power rankings."""
     paths = Paths()
     prediction_path = paths.processed_dir / "predictions.parquet"
     feature_path = paths.processed_dir / "team_pregame_features.parquet"
@@ -134,8 +137,131 @@ def export_workbook() -> None:
     team_stats = pd.read_parquet(feature_path)
     performance = evaluate_predictions(predictions)
     historical_results = predictions[predictions["completed"].astype(bool)].copy()
-    export_all(predictions, team_stats, historical_results, performance, paths)
+
+    # Compute power rankings if source tables are available
+    rankings_df = None
+    if paths.games_csv.exists() and paths.team_game_stats_csv.exists():
+        try:
+            games, stats = _load_source(paths)
+            rankings = fit_power_rankings(games, stats)
+            rankings_df = rankings.to_dataframe()
+        except Exception:
+            rankings_df = None
+
+    export_all(
+        predictions, team_stats, historical_results, performance, paths, power_rankings=rankings_df
+    )
     console.print(f"[green]Wrote Excel workbook:[/] {paths.workbook_xlsx}")
+
+
+@app.command()
+def power_rankings(
+    top: int = typer.Option(25, min=1, help="Number of teams to display"),
+    season: int | None = typer.Option(None, help="Filter to specific season"),
+) -> None:
+    """Compute and display opponent-adjusted CFB Power Rankings."""
+    paths = Paths()
+    games, stats = _load_source(paths)
+    if season is not None:
+        games = games[games["season"] == season]
+    rankings = fit_power_rankings(games, stats)
+    df = rankings.to_dataframe()
+
+    table = Table(
+        title=f"CFB Power Rankings ({rankings.season})",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Rank", justify="right", style="bold")
+    table.add_column("Team", style="bold white")
+    table.add_column("Rating", justify="right", style="green")
+    table.add_column("Tier", style="yellow")
+    table.add_column("Record", justify="center")
+    table.add_column("Offense", justify="right")
+    table.add_column("Defense", justify="right")
+    table.add_column("SOS", justify="right")
+    table.add_column("Recent", justify="right")
+    table.add_column("YPP", justify="right")
+    table.add_column("3rd Down", justify="right")
+    table.add_column("TO Marg", justify="right")
+
+    for _, row in df.head(top).iterrows():
+        table.add_row(
+            str(row["rank"]),
+            str(row["team_name"]),
+            f"{row['power_rating']:+.1f}",
+            str(row["tier"]).replace("Tier ", "T"),
+            str(row["record"]),
+            f"{row['offensive_rating']:+.1f}",
+            f"{row['defensive_rating']:+.1f}",
+            f"{row['strength_of_schedule']:+.1f}",
+            f"{row['recent_form_rating']:+.1f}",
+            f"{row['yards_per_play']:.2f}",
+            f"{row['third_down_rate']:.1%}",
+            f"{row['turnover_margin_pg']:+.1f}",
+        )
+    console.print(table)
+
+
+@app.command()
+def compare(
+    team_a: str = typer.Argument(..., help="Team A ID or display name"),
+    team_b: str = typer.Argument(..., help="Team B ID or display name"),
+    neutral: bool = typer.Option(False, "--neutral", "-n", help="Played at neutral site"),
+    home_team: str | None = typer.Option(
+        None,
+        "--home-team",
+        "-h",
+        help="Explicit home team (defaults to Team A if not neutral)",
+    ),
+) -> None:
+    """Compare any two teams head-to-head and project score, spread, and statistical edges."""
+    paths = Paths()
+    games, stats = _load_source(paths)
+    rankings = fit_power_rankings(games, stats)
+
+    try:
+        comparison = rankings.compare_teams(
+            team_a_id=team_a,
+            team_b_id=team_b,
+            neutral_site=neutral,
+            home_team=home_team,
+        )
+    except KeyError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    site_str = (
+        "Neutral Field"
+        if comparison.neutral_site
+        else f"Home: {comparison.home_team or comparison.team_a.display_name}"
+    )
+    forecast_text = (
+        f"[bold cyan]{comparison.team_a.display_name}[/] vs [bold cyan]{comparison.team_b.display_name}[/]\n"
+        f"Site: [bold]{site_str}[/]\n"
+        f"Projected Score: [bold green]{comparison.team_a.display_name} {comparison.team_a_expected_points:.1f}[/] - "
+        f"[bold green]{comparison.team_b.display_name} {comparison.team_b_expected_points:.1f}[/]\n"
+        f"Projected Spread: [bold yellow]{comparison.favored_team}[/] | Projected Total: [bold]{comparison.projected_total:.1f}[/]\n"
+        f"Win Probability: [bold]{comparison.team_a.display_name} {comparison.team_a_win_probability:.1%}[/] | "
+        f"[bold]{comparison.team_b.display_name} {comparison.team_b_win_probability:.1%}[/] (Confidence: {comparison.confidence_tier})"
+    )
+    console.print(Panel(forecast_text, title="Matchup Forecast", expand=False))
+
+    if comparison.edge_summary:
+        console.print("[bold yellow]Key Matchup Edges:[/]")
+        for edge in comparison.edge_summary:
+            console.print(f" • {edge}")
+
+    table = Table(title="Tale of the Tape", show_header=True, header_style="bold magenta")
+    table.add_column("Metric", style="bold")
+    table.add_column(comparison.team_a.display_name, justify="center")
+    table.add_column(comparison.team_b.display_name, justify="center")
+    for _, row in comparison.stat_comparison.iterrows():
+        table.add_row(
+            str(row["Metric"]),
+            str(row[comparison.team_a.display_name]),
+            str(row[comparison.team_b.display_name]),
+        )
+    console.print(table)
 
 
 if __name__ == "__main__":

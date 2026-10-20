@@ -8,8 +8,13 @@ from .exceptions import (
     ModelNotFittedError,
     ValidationError,
 )
-
-MODEL_VERSION = "v1.0.0-baseline-ridge"
+from .model import MODEL_VERSION
+from .power_ranking import (
+    MatchupComparison,
+    PowerRankings,
+    TeamPowerProfile,
+    fit_power_rankings,
+)
 
 __all__ = [
     "CFBPowerError",
@@ -17,6 +22,10 @@ __all__ = [
     "DataMissingError",
     "ExportError",
     "MODEL_VERSION",
+    "MatchupComparison",
     "ModelNotFittedError",
+    "PowerRankings",
+    "TeamPowerProfile",
     "ValidationError",
+    "fit_power_rankings",
 ]
