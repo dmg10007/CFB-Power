@@ -203,16 +203,23 @@ def export_workbook() -> None:
 
     # Compute power rankings if source tables are available
     rankings_df = None
+    names: dict[str | int, str] = {}
     if paths.games_csv.exists() and paths.team_game_stats_csv.exists():
         try:
-            games, stats = _load_source(paths)
-            rankings = fit_power_rankings(games, stats)
+            games, stats, names = _resolve_source_data(paths)
+            rankings = fit_power_rankings(games, stats, team_names=names)
             rankings_df = rankings.to_dataframe()
         except Exception:
             rankings_df = None
 
     export_all(
-        predictions, team_stats, historical_results, performance, paths, power_rankings=rankings_df
+        predictions,
+        team_stats,
+        historical_results,
+        performance,
+        paths,
+        power_rankings=rankings_df,
+        team_names=names,
     )
     console.print(f"[green]Wrote Excel workbook:[/] {paths.workbook_xlsx}")
 

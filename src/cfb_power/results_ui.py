@@ -206,7 +206,37 @@ def render_results(root, data_dir, busy):
     )
     st.dataframe(summary, width="stretch")
     st.subheader("Game-by-game comparison")
-    st.dataframe(games, width="stretch")
+    if (
+        "matchup" not in games.columns
+        and "away_team" in games.columns
+        and "home_team" in games.columns
+    ):
+        games["matchup"] = games["away_team"].astype(str) + " @ " + games["home_team"].astype(str)
+
+    results_config = {
+        "matchup": st.column_config.TextColumn("Matchup", width="medium"),
+        "status": st.column_config.TextColumn("Status", width="small"),
+        "winner_correct": st.column_config.CheckboxColumn("Pick Correct?"),
+        "actual_home_points": st.column_config.NumberColumn("Actual Home", format="%d"),
+        "actual_away_points": st.column_config.NumberColumn("Actual Away", format="%d"),
+        "home_expected_points": st.column_config.NumberColumn("Proj Home", format="%.1f"),
+        "away_expected_points": st.column_config.NumberColumn("Proj Away", format="%.1f"),
+        "projected_spread_home": st.column_config.NumberColumn("Proj Spread", format="%+.1f"),
+        "actual_margin_home": st.column_config.NumberColumn("Actual Margin", format="%+.0f"),
+        "home_win_probability": st.column_config.ProgressColumn(
+            "Home Win %", format="%.1f%%", min_value=0.0, max_value=1.0
+        ),
+        "margin_absolute_error": st.column_config.NumberColumn("Margin Error", format="%.1f"),
+        "total_absolute_error": st.column_config.NumberColumn("Total Error", format="%.1f"),
+    }
+    game_cols = [c for c in results_config.keys() if c in games.columns]
+    other_cols = [c for c in games.columns if c not in game_cols]
+    st.dataframe(
+        games[game_cols + other_cols],
+        column_config=results_config,
+        width="stretch",
+        hide_index=True,
+    )
     with st.expander("Not scored / coverage gaps"):
         st.dataframe(pd.read_csv(io.BytesIO(files["not_scored.csv"])), width="stretch")
     with st.expander("Excluded prediction candidates"):
