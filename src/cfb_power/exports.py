@@ -46,6 +46,21 @@ def export_all(
     performance: pd.DataFrame,
     paths: Paths,
 ) -> None:
+    """Export predictions, team statistics, and evaluation metrics to CSV and formatted Excel.
+
+    Parameters
+    ----------
+    predictions : pd.DataFrame
+        Forecasted matchups with win probabilities and projected scores.
+    team_stats : pd.DataFrame
+        Team-level pregame rolling features.
+    historical_results : pd.DataFrame
+        Completed games with actual vs forecasted comparisons.
+    performance : pd.DataFrame
+        Model evaluation metrics (accuracy, MAE, log loss, Brier score).
+    paths : Paths
+        Directory paths configuration for export destination.
+    """
     paths.ensure()
     predictions.to_csv(paths.predictions_csv, index=False)
     team_stats.to_csv(paths.team_stats_csv, index=False)

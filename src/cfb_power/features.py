@@ -30,7 +30,20 @@ def _add_rate_metrics(stats: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_team_pregame_features(games: pd.DataFrame, stats: pd.DataFrame) -> pd.DataFrame:
-    """Build pregame rolling team features; every aggregation is shifted one game."""
+    """Build pregame rolling team features with strict zero-leakage lag-1 shifting.
+
+    Parameters
+    ----------
+    games : pd.DataFrame
+        Validated games table containing game_id, season, week, game_date, and completed.
+    stats : pd.DataFrame
+        Validated team game stats table containing box score statistics per team-game.
+
+    Returns
+    -------
+    pd.DataFrame
+        Table with rolling features (last 3 games, last 5 games, and season-to-date expanding).
+    """
     games = validate_games(games)
     stats = validate_team_game_stats(stats, games)
     context = games[["game_id", "season", "week", "game_date", "completed"]]
@@ -57,7 +70,21 @@ def build_team_pregame_features(games: pd.DataFrame, stats: pd.DataFrame) -> pd.
 
 
 def build_matchup_features(games: pd.DataFrame, team_features: pd.DataFrame) -> pd.DataFrame:
-    """Create one pregame row per fixture with home and away team feature prefixes."""
+    """Create one pregame row per fixture with home and away team feature prefixes.
+
+    Parameters
+    ----------
+    games : pd.DataFrame
+        Validated games table.
+    team_features : pd.DataFrame
+        Pregame team feature table produced by `build_team_pregame_features`.
+
+    Returns
+    -------
+    pd.DataFrame
+        Matchup table with home_ and away_ prefixed predictors, neutral site flag,
+        and targets.
+    """
     games = validate_games(games)
     feature_columns = [
         column for column in team_features.columns if column.endswith(("_l3", "_l5", "_season"))

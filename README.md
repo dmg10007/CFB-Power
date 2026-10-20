@@ -94,6 +94,52 @@ tests/                 Unit tests for no-leakage and output contracts
 docs/                  Planning and operating documentation
 ```
 
+## CLI Usage
+
+The package exposes the `cfb-power` CLI command (via `src/cfb_power/cli.py`):
+
+```bash
+# Display help and available commands
+cfb-power --help
+
+# Generate synthetic demonstration dataset
+cfb-power create-demo-data --seasons 3 --teams 12 --weeks 10
+
+# Train model pipelines on completed matchups
+cfb-power train
+
+# Export predictions, metrics, and formatted Excel workbook
+cfb-power export-workbook
+```
+
+### Environment Variables
+
+You can configure data and model storage directories via environment variables:
+- `CFB_DATA_DIR`: Base directory for raw and processed datasets (default: `data/`).
+- `CFB_EXPORT_DIR`: Output directory for CSV and Excel exports (default: `data/exports/`).
+- `CFB_MODEL_DIR`: Directory where serialized models are persisted (default: `models/`).
+
+## Development and Testing
+
+```bash
+# Run code formatting
+ruff format src tests
+
+# Run linter checks
+ruff check src tests
+
+# Execute unit and integration tests
+pytest
+```
+
+## Contributing
+
+1. Create a feature branch from `main`.
+2. Ensure all new code adheres to style guidelines (`ruff format` and `ruff check`).
+3. Add unit tests covering new functionality or bug fixes.
+4. Verify all tests pass with `pytest`.
+5. Open a pull request with a concise summary of changes.
+
 ## Quality rules
 
 - All model features must be available before kickoff.

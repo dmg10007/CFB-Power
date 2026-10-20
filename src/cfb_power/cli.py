@@ -15,16 +15,21 @@ app = typer.Typer(add_completion=False, help="CFB Power V1 forecast pipeline")
 console = Console()
 
 
-def _load_source(paths: Paths) -> tuple[pd.DataFrame, pd.DataFrame]:
-    if not paths.games_csv.exists() or not paths.team_game_stats_csv.exists():
+def _load_source(pipeline_paths: Paths) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load normalized games and team game statistics CSVs."""
+    if not pipeline_paths.games_csv.exists() or not pipeline_paths.team_game_stats_csv.exists():
         raise typer.BadParameter(
             "Missing normalized source data. Run create-demo-data or add CSV files."
         )
-    return pd.read_csv(paths.games_csv), pd.read_csv(paths.team_game_stats_csv)
+    return pd.read_csv(pipeline_paths.games_csv), pd.read_csv(pipeline_paths.team_game_stats_csv)
 
 
 @app.command()
-def create_demo_data(seasons: int = 3, teams: int = 12, weeks: int = 10) -> None:
+def create_demo_data(
+    seasons: int = typer.Option(3, min=1, help="Number of seasons to generate (minimum 1)"),
+    teams: int = typer.Option(12, min=2, help="Number of teams to generate (minimum 2)"),
+    weeks: int = typer.Option(10, min=1, help="Number of regular season weeks (minimum 1)"),
+) -> None:
     """Create synthetic data only to verify the V1 pipeline and workbook exports."""
     paths = Paths()
     paths.ensure()

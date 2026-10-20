@@ -42,7 +42,10 @@ def render_review(data_dir, busy):
                     rows.append(
                         {
                             "field": field,
-                            **{v["run_id"]: value for v, value in zip(versions, values, strict=True)},
+                            **{
+                                v["run_id"]: value
+                                for v, value in zip(versions, values, strict=True)
+                            },
                         }
                     )
             st.dataframe(pd.DataFrame(rows), width="stretch")

@@ -7,12 +7,40 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _resolve_dir(root: Path, env_var: str, default: str) -> Path:
+    val = os.getenv(env_var)
+    if val:
+        path = Path(val)
+        return path if path.is_absolute() else root / path
+    return root / default
+
+
 @dataclass(frozen=True)
 class Paths:
     root: Path = PROJECT_ROOT
-    data_dir: Path = PROJECT_ROOT / os.getenv("CFB_DATA_DIR", "data")
-    export_dir: Path = PROJECT_ROOT / os.getenv("CFB_EXPORT_DIR", "data/exports")
-    model_dir: Path = PROJECT_ROOT / os.getenv("CFB_MODEL_DIR", "models")
+    data_dir: Path | None = None
+    export_dir: Path | None = None
+    model_dir: Path | None = None
+
+    def __post_init__(self) -> None:
+        if self.data_dir is None:
+            object.__setattr__(self, "data_dir", _resolve_dir(self.root, "CFB_DATA_DIR", "data"))
+        elif not self.data_dir.is_absolute():
+            object.__setattr__(self, "data_dir", self.root / self.data_dir)
+
+        if self.export_dir is None:
+            object.__setattr__(
+                self, "export_dir", _resolve_dir(self.root, "CFB_EXPORT_DIR", "data/exports")
+            )
+        elif not self.export_dir.is_absolute():
+            object.__setattr__(self, "export_dir", self.root / self.export_dir)
+
+        if self.model_dir is None:
+            object.__setattr__(
+                self, "model_dir", _resolve_dir(self.root, "CFB_MODEL_DIR", "models")
+            )
+        elif not self.model_dir.is_absolute():
+            object.__setattr__(self, "model_dir", self.root / self.model_dir)
 
     @property
     def raw_dir(self) -> Path:
