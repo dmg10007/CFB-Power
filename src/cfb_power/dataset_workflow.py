@@ -9,7 +9,7 @@ import math
 import os
 import shutil
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -35,11 +35,11 @@ class DatasetError(RuntimeError):
 
 
 def _utc() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _run_id() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "-" + uuid4().hex
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + "-" + uuid4().hex
 
 
 def _sha256(path: Path) -> str:
@@ -67,7 +67,11 @@ def _load_verified(directory: Path | str, schema: str, label: str):
         manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         raise DatasetError(f"{label}: manifest is missing or unreadable") from None
-    if not isinstance(manifest, dict) or manifest.get("status") != "ready" or manifest.get("schema_version") != schema:
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("status") != "ready"
+        or manifest.get("schema_version") != schema
+    ):
         raise DatasetError(f"{label}: manifest must be status ready with schema {schema}")
     outputs = manifest.get("outputs")
     if (
@@ -144,8 +148,10 @@ def _check_consistency(games: dict, stats: dict) -> None:
         ):
             record = teams[team_id]
             if (
-                record["opponent_id"] != opponent or record["is_home"] != is_home
-                or record["points"] != game[own] or record["points_allowed"] != game[other]
+                record["opponent_id"] != opponent
+                or record["is_home"] != is_home
+                or record["points"] != game[own]
+                or record["points_allowed"] != game[other]
             ):
                 raise DatasetError(f"team statistics disagree with game {game_id}")
     bases = {record.get("offensive_plays_basis") for record in stats.values()}
@@ -158,12 +164,15 @@ def discover_snapshots(data_dir: Path | str) -> list[Path]:
     if not base.is_dir():
         return []
     return sorted(
-        path for path in base.iterdir()
+        path
+        for path in base.iterdir()
         if path.is_dir() and not path.name.startswith(".") and (path / "manifest.json").is_file()
     )
 
 
-def assemble_dataset(snapshot_dirs, data_dir: Path | str, *, revision_decisions=None, review_token=None) -> Path:
+def assemble_dataset(
+    snapshot_dirs, data_dir: Path | str, *, revision_decisions=None, review_token=None
+) -> Path:
     """Verify snapshots, merge them conservatively, and publish a new dataset."""
     paths = [Path(item).resolve() for item in snapshot_dirs]
     if not paths:
@@ -177,18 +186,26 @@ def assemble_dataset(snapshot_dirs, data_dir: Path | str, *, revision_decisions=
             try:
                 source_hashes[str(path)] = _sha256(path / "manifest.json")
             except OSError:
-                raise DatasetError(f"snapshot {path.name}: manifest is missing or unreadable") from None
+                raise DatasetError(
+                    f"snapshot {path.name}: manifest is missing or unreadable"
+                ) from None
             manifest, games, stats = _load_verified(path, SNAPSHOT_SCHEMA, f"snapshot {path.name}")
             if manifest.get("offensive_plays_basis") != PLAY_COUNT_BASIS:
                 raise DatasetError(f"snapshot {path.name}: unsupported offensive-play basis")
-            if not isinstance(manifest.get("started_at_utc"), str) or not isinstance(manifest.get("run_id"), str):
+            if not isinstance(manifest.get("started_at_utc"), str) or not isinstance(
+                manifest.get("run_id"), str
+            ):
                 raise DatasetError(f"snapshot {path.name}: manifest lacks run identity")
             if source_hashes[str(path)] != _sha256(path / "manifest.json"):
                 raise DatasetError("Snapshot changed during verification")
-            loaded.append((
-                manifest, path, _index(games, ("game_id",), path.name),
-                _index(stats, ("game_id", "team_id"), path.name),
-            ))
+            loaded.append(
+                (
+                    manifest,
+                    path,
+                    _index(games, ("game_id",), path.name),
+                    _index(stats, ("game_id", "team_id"), path.name),
+                )
+            )
     except (ValueError, KeyError, TypeError) as exc:
         if isinstance(exc, DatasetError):
             raise
@@ -201,14 +218,18 @@ def assemble_dataset(snapshot_dirs, data_dir: Path | str, *, revision_decisions=
     revision_audit = None
     if revision_decisions is not None:
         from .revisions import apply_review
+
         merge_inputs, revision_audit = apply_review(
-            loaded, revision_decisions, review_token, _check_consistency,
+            loaded,
+            revision_decisions,
+            review_token,
+            _check_consistency,
         )
         revision_audit["approved_at_utc"] = _utc()
     elif review_token is not None:
         raise DatasetError("A review token requires explicit revision decisions")
     merged_games, merged_stats, upgraded = {}, {}, 0
-    for manifest, path, game_records, stat_records in merge_inputs:
+    for _manifest, _path, game_records, stat_records in merge_inputs:
         for key, record in game_records.items():
             existing = merged_games.get(key)
             if existing is None or existing == record:
@@ -228,7 +249,9 @@ def assemble_dataset(snapshot_dirs, data_dir: Path | str, *, revision_decisions=
                 raise DatasetError(f"conflicting team statistics for {key}")
     _check_consistency(merged_games, merged_stats)
 
-    extra = sorted({name for record in merged_games.values() for name in record} - set(GAME_COLUMNS))
+    extra = sorted(
+        {name for record in merged_games.values() for name in record} - set(GAME_COLUMNS)
+    )
     games_frame = pd.DataFrame(
         sorted(merged_games.values(), key=lambda row: (row["game_date"], row["game_id"])),
         columns=[*GAME_COLUMNS, *extra],
@@ -257,29 +280,39 @@ def assemble_dataset(snapshot_dirs, data_dir: Path | str, *, revision_decisions=
             artifacts.append({"file": filename, "rows": len(frame), "sha256": _sha256(path)})
         completed = int(games_frame["completed"].astype(bool).sum())
         manifest = {
-            "dataset_id": dataset_id, "schema_version": DATASET_SCHEMA, "status": "ready",
+            "dataset_id": dataset_id,
+            "schema_version": DATASET_SCHEMA,
+            "status": "ready",
             "created_at_utc": _utc(),
             "inputs": [
                 {
-                    "run_id": item[0]["run_id"], "path": str(item[1]),
+                    "run_id": item[0]["run_id"],
+                    "path": str(item[1]),
                     "manifest_sha256": source_hashes[str(item[1])],
-                    "started_at_utc": item[0]["started_at_utc"], "scope": item[0].get("scope"),
+                    "started_at_utc": item[0]["started_at_utc"],
+                    "scope": item[0].get("scope"),
                     "counts": item[0].get("counts"),
                 }
                 for item in loaded
             ],
             "counts": {
-                "snapshots": len(loaded), "games": len(games_frame), "completed_games": completed,
-                "upcoming_games": len(games_frame) - completed, "team_stat_rows": len(stats_frame),
+                "snapshots": len(loaded),
+                "games": len(games_frame),
+                "completed_games": completed,
+                "upcoming_games": len(games_frame) - completed,
+                "team_stat_rows": len(stats_frame),
                 "upcoming_replaced_by_completed": upgraded,
             },
-            "outputs": artifacts, "offensive_plays_basis": PLAY_COUNT_BASIS,
+            "outputs": artifacts,
+            "offensive_plays_basis": PLAY_COUNT_BASIS,
             "red_zone_policy": RED_ZONE_POLICY,
         }
         if revision_audit is not None:
             manifest["revisions"] = revision_audit
-        if any(_sha256(Path(path) / "manifest.json") != digest
-               for path, digest in source_hashes.items()):
+        if any(
+            _sha256(Path(path) / "manifest.json") != digest
+            for path, digest in source_hashes.items()
+        ):
             raise DatasetError("Snapshot changed before publication; review again")
         _write_json(staging / "manifest.json", manifest)
         if output.exists():
@@ -303,7 +336,10 @@ def train_from_dataset(dataset_dir: Path | str, data_dir: Path | str) -> Path:
     run_dir = Path(data_dir) / "runs" / manifest["dataset_id"] / _run_id()
     run_dir.mkdir(parents=True, exist_ok=False)
     paths = Paths(
-        root=run_dir, data_dir=Path(data_dir), export_dir=run_dir / "exports", model_dir=run_dir / "models",
+        root=run_dir,
+        data_dir=Path(data_dir),
+        export_dir=run_dir / "exports",
+        model_dir=run_dir / "models",
     )
     team_features = build_team_pregame_features(games, stats)
     matchups = build_matchup_features(games, team_features)
@@ -313,19 +349,27 @@ def train_from_dataset(dataset_dir: Path | str, data_dir: Path | str) -> Path:
     performance = evaluate_predictions(predictions)
     historical = predictions[predictions["completed"].astype(bool)].copy()
     export_all(predictions, team_features, historical, performance, paths)
-    _write_json(run_dir / "run_manifest.json", {
-        "dataset_id": manifest["dataset_id"], "created_at_utc": _utc(),
-        "dataset_manifest_sha256": _sha256(Path(dataset_dir) / "manifest.json"),
-        "completed_games": len(completed), "prediction_rows": len(predictions),
-        "evaluation_scope": "in_sample_pipeline_check",
-        "note": "Metrics compare predictions with games used for training; they are not out-of-sample accuracy.",
-        "exports_dir": str(paths.export_dir), "model_file": str(paths.model_file),
-    })
+    _write_json(
+        run_dir / "run_manifest.json",
+        {
+            "dataset_id": manifest["dataset_id"],
+            "created_at_utc": _utc(),
+            "dataset_manifest_sha256": _sha256(Path(dataset_dir) / "manifest.json"),
+            "completed_games": len(completed),
+            "prediction_rows": len(predictions),
+            "evaluation_scope": "in_sample_pipeline_check",
+            "note": "Metrics compare predictions with games used for training; they are not out-of-sample accuracy.",
+            "exports_dir": str(paths.export_dir),
+            "model_file": str(paths.model_file),
+        },
+    )
     return run_dir
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Assemble verified datasets and train from an explicit dataset")
+    parser = argparse.ArgumentParser(
+        description="Assemble verified datasets and train from an explicit dataset"
+    )
     parser.add_argument("--data-dir", type=Path, default=Paths().data_dir)
     commands = parser.add_subparsers(dest="command", required=True)
     assemble = commands.add_parser("assemble", help="verify snapshots and publish a new dataset")
@@ -356,4 +400,3 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

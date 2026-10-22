@@ -80,14 +80,20 @@ def normalize_games(payload: Any) -> pd.DataFrame:
             if not completed and value is not None:
                 raise DataValidationError(f"game {game_id}: unfinished game has a score")
             scores[side] = _integer(value, f"{side}Points") if completed else None
-        rows.append({
-            "game_id": game_id, "season": _integer(game.get("season"), "season", 1),
-            "week": _integer(game.get("week"), "week"),
-            "game_date": kickoff.tz_convert("UTC"),
-            "home_team_id": home, "away_team_id": away,
-            "home_score": scores["home"], "away_score": scores["away"],
-            "neutral_site": game["neutralSite"], "completed": completed,
-        })
+        rows.append(
+            {
+                "game_id": game_id,
+                "season": _integer(game.get("season"), "season", 1),
+                "week": _integer(game.get("week"), "week"),
+                "game_date": kickoff.tz_convert("UTC"),
+                "home_team_id": home,
+                "away_team_id": away,
+                "home_score": scores["home"],
+                "away_score": scores["away"],
+                "neutral_site": game["neutralSite"],
+                "completed": completed,
+            }
+        )
     return pd.DataFrame(rows, columns=GAME_COLUMNS)
 
 
@@ -104,7 +110,8 @@ def _categories(team: dict) -> dict[str, Any]:
 
 
 def normalize_cfbd_canonical(
-    games_payload: Any, team_stats_payload: Any,
+    games_payload: Any,
+    team_stats_payload: Any,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return canonical games and completed-game team stats as one validated batch.
 
@@ -141,7 +148,10 @@ def normalize_cfbd_canonical(
         if set(indexed) != {game["home_team_id"], game["away_team_id"]}:
             raise DataValidationError(f"game {game_id}: team IDs disagree with schedule")
         stats = {team_id: _categories(team) for team_id, team in indexed.items()}
-        turnovers = {team_id: _integer(value.get("turnovers"), "turnovers") for team_id, value in stats.items()}
+        turnovers = {
+            team_id: _integer(value.get("turnovers"), "turnovers")
+            for team_id, value in stats.items()
+        }
         for side, opponent_side in (("home", "away"), ("away", "home")):
             team_id, opponent_id = game[f"{side}_team_id"], game[f"{opponent_side}_team_id"]
             team, values = indexed[team_id], stats[team_id]
@@ -150,7 +160,9 @@ def normalize_cfbd_canonical(
                 raise DataValidationError(f"game {game_id}: role or score mismatch")
             conversions, attempts = _pair(values.get("thirdDownEff"), "thirdDownEff")
             _, passing_attempts = _pair(values.get("completionAttempts"), "completionAttempts")
-            penalties, penalty_yards = _pair(values.get("totalPenaltiesYards"), "totalPenaltiesYards", False)
+            penalties, penalty_yards = _pair(
+                values.get("totalPenaltiesYards"), "totalPenaltiesYards", False
+            )
             plays = passing_attempts + _integer(values.get("rushingAttempts"), "rushingAttempts")
             if plays <= 0:
                 raise DataValidationError("offensive play-count proxy must be positive")
@@ -159,19 +171,30 @@ def normalize_cfbd_canonical(
             rushing = _integer(values.get("rushingYards"), "rushingYards", None)
             if total != passing + rushing:
                 raise DataValidationError(f"game {game_id}: yardage components disagree")
-            rows.append({
-                "game_id": game_id, "team_id": team_id, "opponent_id": opponent_id,
-                "is_home": side == "home", "points": points,
-                "points_allowed": game[f"{opponent_side}_score"],
-                "total_yards": total, "offensive_plays": plays,
-                "passing_yards": passing, "rushing_yards": rushing,
-                "turnovers": turnovers[team_id], "takeaways": turnovers[opponent_id],
-                "third_down_attempts": attempts, "third_down_conversions": conversions,
-                "red_zone_attempts": None, "red_zone_touchdowns": None,
-                "penalties": penalties, "penalty_yards": penalty_yards,
-                "time_of_possession_seconds": _possession(values.get("possessionTime")),
-                "offensive_plays_basis": PLAY_COUNT_BASIS,
-            })
+            rows.append(
+                {
+                    "game_id": game_id,
+                    "team_id": team_id,
+                    "opponent_id": opponent_id,
+                    "is_home": side == "home",
+                    "points": points,
+                    "points_allowed": game[f"{opponent_side}_score"],
+                    "total_yards": total,
+                    "offensive_plays": plays,
+                    "passing_yards": passing,
+                    "rushing_yards": rushing,
+                    "turnovers": turnovers[team_id],
+                    "takeaways": turnovers[opponent_id],
+                    "third_down_attempts": attempts,
+                    "third_down_conversions": conversions,
+                    "red_zone_attempts": None,
+                    "red_zone_touchdowns": None,
+                    "penalties": penalties,
+                    "penalty_yards": penalty_yards,
+                    "time_of_possession_seconds": _possession(values.get("possessionTime")),
+                    "offensive_plays_basis": PLAY_COUNT_BASIS,
+                }
+            )
     columns = [*TEAM_GAME_STAT_COLUMNS, "offensive_plays_basis"]
     frame = pd.DataFrame(rows, columns=columns)
     for column in ("red_zone_attempts", "red_zone_touchdowns"):

@@ -14,11 +14,20 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from .config import Paths
-from .dataset_workflow import DATASET_SCHEMA, DatasetError, _load_verified, _run_id, _sha256, _utc, _write_json
+from .dataset_workflow import (
+    DATASET_SCHEMA,
+    DatasetError,
+    _load_verified,
+    _run_id,
+    _sha256,
+    _utc,
+    _write_json,
+)
 from .model import _normal_cdf
+from .power_ranking import fit_power_rankings
 from .validation import DataValidationError, validate_games, validate_team_game_stats
 
-MODEL_NAME = "rolling_average"
+MODEL_NAME = "power_rankings_v1"
 STALE_DAYS = 9
 DEFAULT_MIN_HISTORY_GAMES = 3
 
@@ -33,7 +42,9 @@ def _team_names(dataset_manifest: dict, warnings: list) -> dict:
                 raise ValueError("snapshot manifest changed")
             snapshot = json.loads(snapshot_manifest.read_text(encoding="utf-8"))
             games_path = Path(snapshot["raw_archive"]) / "games.json"
-            expected = next(entry["sha256"] for entry in snapshot["requests"] if entry["file"] == "games.json")
+            expected = next(
+                entry["sha256"] for entry in snapshot["requests"] if entry["file"] == "games.json"
+            )
             if _sha256(games_path) != expected:
                 raise ValueError("raw schedule changed")
             for game in json.loads(games_path.read_text(encoding="utf-8")):
@@ -42,7 +53,9 @@ def _team_names(dataset_manifest: dict, warnings: list) -> dict:
                     if type(team_id) is int and isinstance(name, str) and name:
                         names[team_id] = name
         except (OSError, ValueError, KeyError, TypeError, StopIteration):
-            warnings.append(f"team names unavailable from snapshot {item.get('run_id', '?')}; showing IDs where missing")
+            warnings.append(
+                f"team names unavailable from snapshot {item.get('run_id', '?')}; showing IDs where missing"
+            )
     return names
 
 
@@ -75,12 +88,19 @@ def _format_workbook(path: Path, predictions: pd.DataFrame, readme: list) -> Non
     sheet.column_dimensions["B"].width = 110
     sheet = workbook.create_sheet("Predictions")
     display = predictions.copy()
-    for column in ("home_expected_points", "away_expected_points", "projected_spread_home", "projected_total"):
+    for column in (
+        "home_expected_points",
+        "away_expected_points",
+        "projected_spread_home",
+        "projected_total",
+    ):
         display[column] = display[column].round(1)
     display["home_win_probability"] = display["home_win_probability"].round(3)
     sheet.append(list(display.columns))
     for row in display.itertuples(index=False, name=None):
-        sheet.append([None if isinstance(value, float) and np.isnan(value) else value for value in row])
+        sheet.append(
+            [None if isinstance(value, float) and np.isnan(value) else value for value in row]
+        )
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
     for cell in sheet[1]:
@@ -97,14 +117,18 @@ def _format_workbook(path: Path, predictions: pd.DataFrame, readme: list) -> Non
 
 
 def predict_upcoming(
-    dataset_dir: Path | str, data_dir: Path | str, as_of=None,
+    dataset_dir: Path | str,
+    data_dir: Path | str,
+    as_of=None,
     min_history_games: int = DEFAULT_MIN_HISTORY_GAMES,
+    model: str = "power_rankings",
 ) -> Path:
     """Forecast not-yet-started games from completed games played before their kickoff.
 
-    Uses the rolling-average model: each side's expected points are the average of its own
-    season points scored and the opponent's season points allowed (league mean when a team
-    has no history). There is no home-field term. Writes only to a new run directory.
+    Supports:
+    - 'power_rankings': Opponent-adjusted Ridge ratings with full situational efficiency metrics
+      (yards/play, 3rd down, red zone, turnovers, TOP), SOS schedule adjustments, and recency weighting.
+    - 'rolling_average': Baseline average of season points scored and opponent points allowed.
     """
     if type(min_history_games) is not int or min_history_games < 0:
         raise ValueError("min_history_games must be a nonnegative integer")
@@ -119,9 +143,14 @@ def predict_upcoming(
 
     margins = completed["home_score"] - completed["away_score"]
     scale = max(float(margins.std(ddof=1)), 1.0) if len(completed) > 1 else 1.0
-    league_home, league_away = float(completed["home_score"].mean()), float(completed["away_score"].mean())
+    league_home, league_away = (
+        float(completed["home_score"].mean()),
+        float(completed["away_score"].mean()),
+    )
     history = stats.merge(completed[["game_id", "season", "game_date"]], on="game_id")
-    by_team = {key: frame.sort_values("game_date") for key, frame in history.groupby(["team_id", "season"])}
+    by_team = {
+        key: frame.sort_values("game_date") for key, frame in history.groupby(["team_id", "season"])
+    }
 
     def state(team_id, season, kickoff):
         frame = by_team.get((team_id, season))
@@ -132,30 +161,95 @@ def predict_upcoming(
 
     warnings: list = []
     names = _team_names(manifest, warnings)
+
+    is_power_model = str(model).lower().startswith("power")
+    model_label = "power_rankings_v1" if is_power_model else "rolling_average"
+
+    rankings_engine = None
+    if is_power_model:
+        try:
+            rankings_engine = fit_power_rankings(completed, stats, team_names=names)
+        except Exception as exc:
+            warnings.append(f"Power rankings fit fallback to rolling average due to: {exc}")
+            is_power_model = False
+            model_label = "rolling_average"
+
     rows, skipped = [], []
     for game in upcoming.sort_values(["game_date", "game_id"]).itertuples(index=False):
         if not (pd.isna(game.home_score) and pd.isna(game.away_score)):
             skipped.append({"game_id": game.game_id, "reason": "has scores but is not completed"})
         elif game.game_date <= moment:
-            skipped.append({"game_id": game.game_id, "reason": "kickoff has passed or game is in progress"})
+            skipped.append(
+                {"game_id": game.game_id, "reason": "kickoff has passed or game is in progress"}
+            )
         else:
-            home_n, home_offense, home_defense = state(game.home_team_id, game.season, game.game_date)
-            away_n, away_offense, away_defense = state(game.away_team_id, game.season, game.game_date)
-            home = _mean_or([home_offense, away_defense], league_home)
-            away = _mean_or([away_offense, home_defense], league_away)
-            rows.append({
-                "game_id": game.game_id,
-                "kickoff_utc": game.game_date.strftime("%Y-%m-%d %H:%M UTC"),
-                "home_team_id": game.home_team_id, "away_team_id": game.away_team_id,
-                "home_team": names.get(game.home_team_id, ""), "away_team": names.get(game.away_team_id, ""),
-                "neutral_site": bool(game.neutral_site),
-                "home_games_played": home_n, "away_games_played": away_n,
-                "low_history": min(home_n, away_n) < min_history_games,
-                "home_expected_points": home, "away_expected_points": away,
-                "projected_spread_home": home - away, "projected_total": home + away,
-                "home_win_probability": float(_normal_cdf((home - away) / scale)),
-                "model": MODEL_NAME,
-            })
+            home_n, home_offense, home_defense = state(
+                game.home_team_id, game.season, game.game_date
+            )
+            away_n, away_offense, away_defense = state(
+                game.away_team_id, game.season, game.game_date
+            )
+
+            home_team_name = names.get(game.home_team_id)
+            away_team_name = names.get(game.away_team_id)
+            is_neutral = bool(game.neutral_site)
+            matchup_str = (
+                f"{away_team_name or game.away_team_id} {'vs' if is_neutral else '@'} "
+                f"{home_team_name or game.home_team_id}{' (N)' if is_neutral else ''}"
+            )
+
+            if is_power_model and rankings_engine is not None and (home_n > 0 or away_n > 0):
+                comp = rankings_engine.compare_teams(
+                    game.home_team_id, game.away_team_id, neutral_site=is_neutral
+                )
+                home = comp.team_a_expected_points
+                away = comp.team_b_expected_points
+                spread = comp.projected_spread
+                total = comp.projected_total
+                prob = comp.team_a_win_probability
+                score_low_h = comp.team_a_score_low
+                score_high_h = comp.team_a_score_high
+                score_low_a = comp.team_b_score_low
+                score_high_a = comp.team_b_score_high
+                conf_tier = comp.confidence_tier
+            else:
+                home = _mean_or([home_offense, away_defense], league_home)
+                away = _mean_or([away_offense, home_defense], league_away)
+                spread = home - away
+                total = home + away
+                prob = float(_normal_cdf((home - away) / scale))
+                score_low_h = max(0.0, round(home - scale / 1.4, 1))
+                score_high_h = round(home + scale / 1.4, 1)
+                score_low_a = max(0.0, round(away - scale / 1.4, 1))
+                score_high_a = round(away + scale / 1.4, 1)
+                conf_tier = "Low"
+
+            rows.append(
+                {
+                    "game_id": game.game_id,
+                    "kickoff_utc": game.game_date.strftime("%Y-%m-%d %H:%M UTC"),
+                    "matchup": matchup_str,
+                    "home_team_id": game.home_team_id,
+                    "away_team_id": game.away_team_id,
+                    "home_team": home_team_name,
+                    "away_team": away_team_name,
+                    "neutral_site": is_neutral,
+                    "home_games_played": home_n,
+                    "away_games_played": away_n,
+                    "low_history": min(home_n, away_n) < min_history_games,
+                    "home_expected_points": home,
+                    "away_expected_points": away,
+                    "projected_spread_home": spread,
+                    "projected_total": total,
+                    "home_win_probability": prob,
+                    "home_score_low": score_low_h,
+                    "home_score_high": score_high_h,
+                    "away_score_low": score_low_a,
+                    "away_score_high": score_high_a,
+                    "confidence_tier": conf_tier,
+                    "model": model_label,
+                }
+            )
     if not rows:
         reasons = sorted({item["reason"] for item in skipped}) or ["dataset has no upcoming games"]
         raise DatasetError("no upcoming games to predict (" + "; ".join(reasons) + ")")
@@ -174,20 +268,37 @@ def predict_upcoming(
         )
     low = int(predictions["low_history"].sum())
     if low:
-        warnings.append(f"{low} of {len(predictions)} games involve a team with fewer than {min_history_games} prior games")
+        warnings.append(
+            f"{low} of {len(predictions)} games involve a team with fewer than {min_history_games} prior games"
+        )
 
     run_dir = Path(data_dir) / "runs" / manifest["dataset_id"] / ("predictions_" + _run_id())
     run_dir.mkdir(parents=True, exist_ok=False)
     predictions.to_csv(run_dir / "predictions.csv", index=False)
-    pd.DataFrame(skipped, columns=["game_id", "reason"]).to_csv(run_dir / "skipped.csv", index=False)
+    pd.DataFrame(skipped, columns=["game_id", "reason"]).to_csv(
+        run_dir / "skipped.csv", index=False
+    )
+    model_desc = (
+        "power_rankings_v1: Opponent-adjusted Ridge ratings with situational efficiency (yards/play, 3rd down, red zone, turnovers, TOP), SOS schedule adjustment, and recency weighting"
+        if is_power_model
+        else "rolling_average: average of a team's season points scored and the opponent's season points allowed"
+    )
+    hfa_desc = (
+        "+2.5 points explicit home-field advantage (neutral-site games adjusted to 0.0)"
+        if is_power_model
+        else "No home-field adjustment is applied; 'home' is the listed home team."
+    )
     readme = [
         ["CFB Power upcoming-game forecasts"],
         ["Generated UTC", _utc()],
         ["As-of time UTC", moment.isoformat()],
         ["Data through (UTC)", data_through.isoformat()],
-        ["Model", "rolling_average: average of a team's season points scored and the opponent's season points allowed"],
-        ["Home field", "No home-field adjustment is applied; 'home' is the listed home team."],
-        ["Win probability", "Normal approximation using the spread of completed-game margins; treat as a rough guide."],
+        ["Model", model_desc],
+        ["Home field", hfa_desc],
+        [
+            "Win probability",
+            "Normal distribution CDF based on projected scoring margin and model residual error standard deviation.",
+        ],
         ["Warnings", "; ".join(warnings) if warnings else "none"],
     ]
     _format_workbook(run_dir / "upcoming_predictions.xlsx", predictions, readme)
@@ -198,56 +309,92 @@ def predict_upcoming(
     reasons: dict = {}
     for item in skipped:
         reasons[item["reason"]] = reasons.get(item["reason"], 0) + 1
-    _write_json(run_dir / "manifest.json", {
-        "kind": "upcoming_predictions", "status": "ready", "created_at_utc": _utc(),
-        "dataset_id": manifest["dataset_id"],
-        "dataset_manifest_sha256": _sha256(Path(dataset_dir) / "manifest.json"),
-        "model": MODEL_NAME, "as_of_utc": moment.isoformat(), "data_through_utc": data_through.isoformat(),
-        "settings": {"min_history_games": min_history_games, "stale_days": STALE_DAYS},
-        "counts": {
-            "upcoming_in_dataset": int(len(upcoming)), "predicted": int(len(predictions)),
-            "skipped": len(skipped), "low_history": low, "past_kickoff_unresolved": unresolved,
+    _write_json(
+        run_dir / "manifest.json",
+        {
+            "kind": "upcoming_predictions",
+            "status": "ready",
+            "created_at_utc": _utc(),
+            "dataset_id": manifest["dataset_id"],
+            "dataset_manifest_sha256": _sha256(Path(dataset_dir) / "manifest.json"),
+            "model": model_label,
+            "as_of_utc": moment.isoformat(),
+            "data_through_utc": data_through.isoformat(),
+            "settings": {"min_history_games": min_history_games, "stale_days": STALE_DAYS},
+            "counts": {
+                "upcoming_in_dataset": int(len(upcoming)),
+                "predicted": int(len(predictions)),
+                "skipped": len(skipped),
+                "low_history": low,
+                "past_kickoff_unresolved": unresolved,
+            },
+            "skip_reasons": reasons,
+            "warnings": warnings,
+            "outputs": outputs,
+            "notes": [
+                "Power rankings model incorporates opponent adjustments, SOS, situational box stats, and recency weighting."
+                if is_power_model
+                else "Rolling-average model selected from walk-forward evaluation; see docs/UPCOMING_PREDICTIONS.md."
+            ],
         },
-        "skip_reasons": reasons, "warnings": warnings, "outputs": outputs,
-        "notes": [
-            "Rolling-average model selected from walk-forward evaluation; see docs/UPCOMING_PREDICTIONS.md.",
-            "No home-field term: adding one worsened out-of-sample results in the model experiments.",
-        ],
-    })
+    )
     return run_dir
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Forecast upcoming games from one verified dataset")
+    parser = argparse.ArgumentParser(
+        description="Forecast upcoming games from one verified dataset"
+    )
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--data-dir", type=Path, default=Paths().data_dir)
     parser.add_argument("--as-of", help="ISO timestamp with timezone; defaults to now (UTC)")
     parser.add_argument("--min-history-games", type=int, default=DEFAULT_MIN_HISTORY_GAMES)
+    parser.add_argument(
+        "--model",
+        default="power_rankings",
+        choices=["power_rankings", "rolling_average"],
+        help="Forecasting model to use (default: power_rankings)",
+    )
     args = parser.parse_args(argv)
     try:
-        run_dir = predict_upcoming(args.dataset, args.data_dir, args.as_of, args.min_history_games)
+        run_dir = predict_upcoming(
+            args.dataset,
+            args.data_dir,
+            args.as_of,
+            args.min_history_games,
+            model=args.model,
+        )
     except (DatasetError, DataValidationError, ValueError, OSError) as exc:
         print(f"Upcoming predictions failed: {exc}", file=sys.stderr)
         return 1
-    predictions = pd.read_csv(run_dir / "predictions.csv").fillna({"home_team": "", "away_team": ""})
+    predictions = pd.read_csv(run_dir / "predictions.csv").fillna(
+        {"home_team": "", "away_team": ""}
+    )
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     print(f"Predictions run: {run_dir}")
     print(f"Workbook: {run_dir / 'upcoming_predictions.xlsx'}")
-    print(f"Predicted {manifest['counts']['predicted']} games; skipped {manifest['counts']['skipped']}")
-    table = pd.DataFrame({
-        "kickoff": predictions["kickoff_utc"],
-        "matchup": [
-            f"{away or away_id} @ {home or home_id}"
-            for away, home, away_id, home_id in zip(
-                predictions["away_team"], predictions["home_team"],
-                predictions["away_team_id"], predictions["home_team_id"],
-            )
-        ],
-        "spread_home": predictions["projected_spread_home"].round(1),
-        "total": predictions["projected_total"].round(1),
-        "home_win_pct": (predictions["home_win_probability"] * 100).round(1),
-        "low_history": predictions["low_history"],
-    })
+    print(
+        f"Predicted {manifest['counts']['predicted']} games; skipped {manifest['counts']['skipped']}"
+    )
+    table = pd.DataFrame(
+        {
+            "kickoff": predictions["kickoff_utc"],
+            "matchup": [
+                f"{away or away_id} @ {home or home_id}"
+                for away, home, away_id, home_id in zip(
+                    predictions["away_team"],
+                    predictions["home_team"],
+                    predictions["away_team_id"],
+                    predictions["home_team_id"],
+                    strict=True,
+                )
+            ],
+            "spread_home": predictions["projected_spread_home"].round(1),
+            "total": predictions["projected_total"].round(1),
+            "home_win_pct": (predictions["home_win_probability"] * 100).round(1),
+            "low_history": predictions["low_history"],
+        }
+    )
     print(table.head(25).to_string(index=False))
     for warning in manifest["warnings"]:
         print(f"WARNING: {warning}")

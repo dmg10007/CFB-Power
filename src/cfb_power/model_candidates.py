@@ -15,9 +15,12 @@ from .features import model_feature_columns
 from .model import _normal_cdf
 
 SMALL_FEATURES = (
-    "home_points_season", "away_points_season",
-    "home_points_allowed_season", "away_points_allowed_season",
-    "home_yards_per_play_season", "away_yards_per_play_season",
+    "home_points_season",
+    "away_points_season",
+    "home_points_allowed_season",
+    "away_points_allowed_season",
+    "home_yards_per_play_season",
+    "away_yards_per_play_season",
     "home_field_indicator",
 )
 SCALED_ALPHA = 10.0
@@ -53,11 +56,13 @@ class ScaledRidge:
 
 
 def _scaled_pipeline(alpha: float) -> Pipeline:
-    return Pipeline([
-        ("imputer", SimpleImputer(strategy="median")),
-        ("scaler", StandardScaler()),
-        ("regression", Ridge(alpha=alpha)),
-    ])
+    return Pipeline(
+        [
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
+            ("regression", Ridge(alpha=alpha)),
+        ]
+    )
 
 
 def fit_scaled_ridge(train: pd.DataFrame, features, alpha: float = SCALED_ALPHA) -> ScaledRidge:
@@ -75,16 +80,24 @@ def fit_scaled_ridge(train: pd.DataFrame, features, alpha: float = SCALED_ALPHA)
 def predict_scaled(target: pd.DataFrame, model: ScaledRidge):
     home = pd.Series(model.home.predict(target[model.features]), index=target.index).clip(0, 70)
     away = pd.Series(model.away.predict(target[model.features]), index=target.index).clip(0, 70)
-    return home, away, pd.Series(_normal_cdf((home - away) / model.residual_std), index=target.index)
+    return (
+        home,
+        away,
+        pd.Series(_normal_cdf((home - away) / model.residual_std), index=target.index),
+    )
 
 
 def _shrink(mean: pd.Series, games: pd.Series, prior_games: float, league: float) -> pd.Series:
     denominator = games + prior_games
-    shrunk = (mean.fillna(0.0) * games + prior_games * league) / denominator.where(denominator > 0, np.nan)
+    shrunk = (mean.fillna(0.0) * games + prior_games * league) / denominator.where(
+        denominator > 0, np.nan
+    )
     return shrunk.fillna(league)
 
 
-def shrunk_expectation(target: pd.DataFrame, train: pd.DataFrame, prior_games: float, home_advantage: bool):
+def shrunk_expectation(
+    target: pd.DataFrame, train: pd.DataFrame, prior_games: float, home_advantage: bool
+):
     """Average each side's shrunk offense with the opponent's shrunk defense.
 
     prior_games=0 reproduces the rolling-average baseline for teams with history.
@@ -99,7 +112,11 @@ def shrunk_expectation(target: pd.DataFrame, train: pd.DataFrame, prior_games: f
     away = (offense_away + defense_home) / 2
     if home_advantage:
         home_games = train[train["home_field_indicator"] == 1]
-        advantage = float((home_games["home_score"] - home_games["away_score"]).mean()) / 2 if len(home_games) else 0.0
+        advantage = (
+            float((home_games["home_score"] - home_games["away_score"]).mean()) / 2
+            if len(home_games)
+            else 0.0
+        )
         home = home + advantage * target["home_field_indicator"]
         away = away - advantage * target["home_field_indicator"]
     scale = max(float((train["home_score"] - train["away_score"]).std(ddof=1)), 1.0)

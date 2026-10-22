@@ -42,7 +42,9 @@ def validate_team_game_stats(stats: pd.DataFrame, games: pd.DataFrame) -> pd.Dat
 
 
 def validate_no_future_feature_data(features: pd.DataFrame) -> None:
-    feature_columns = [column for column in features.columns if column.endswith(("_l3", "_l5", "_season"))]
+    feature_columns = [
+        column for column in features.columns if column.endswith(("_l3", "_l5", "_season"))
+    ]
     if not feature_columns:
         raise DataValidationError("feature table has no rolling pregame columns")
     if features[feature_columns].isna().all(axis=None):

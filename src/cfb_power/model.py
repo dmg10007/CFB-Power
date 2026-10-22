@@ -10,9 +10,10 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 
-from . import MODEL_VERSION
 from .config import Paths
 from .features import model_feature_columns
+
+MODEL_VERSION = "v1.0.0-baseline-ridge"
 
 
 @dataclass
@@ -33,6 +34,26 @@ def _pipeline() -> Pipeline:
 
 
 def fit_score_models(training_matchups: pd.DataFrame, paths: Paths | None = None) -> ScoreModels:
+    """Fit home and away Ridge regression models on historical matchup features.
+
+    Parameters
+    ----------
+    training_matchups : pd.DataFrame
+        DataFrame of historical matchups containing target points and features.
+    paths : Paths | None, optional
+        Paths instance for persisting the fitted model to disk.
+
+    Returns
+    -------
+    ScoreModels
+        Container holding fitted home and away pipelines, feature names,
+        and margin residual standard deviation.
+
+    Raises
+    ------
+    ValueError
+        If fewer than 20 completed matchups are provided.
+    """
     train = training_matchups.dropna(subset=["home_target_points", "away_target_points"]).copy()
     features = model_feature_columns(train)
     if len(train) < 20:
@@ -62,10 +83,27 @@ def _normal_cdf(values: pd.Series | np.ndarray) -> np.ndarray:
 
 
 def predict_matchups(matchups: pd.DataFrame, models: ScoreModels) -> pd.DataFrame:
+    """Generate expected points, spreads, win probabilities, and confidence intervals.
+
+    Parameters
+    ----------
+    matchups : pd.DataFrame
+        DataFrame of matchup fixtures with pregame features.
+    models : ScoreModels
+        Fitted models containing regression pipelines and residual standard deviation.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of input matchups enriched with expected points, projected spread,
+        projected total, home win probability, score intervals, and confidence tier.
+    """
     result = matchups.copy()
     result["home_expected_points"] = models.home.predict(result[models.features]).clip(0, 70)
     result["away_expected_points"] = models.away.predict(result[models.features]).clip(0, 70)
-    result["projected_spread_home"] = result["home_expected_points"] - result["away_expected_points"]
+    result["projected_spread_home"] = (
+        result["home_expected_points"] - result["away_expected_points"]
+    )
     result["projected_total"] = result["home_expected_points"] + result["away_expected_points"]
     z = result["projected_spread_home"] / models.margin_residual_std
     result["home_win_probability"] = _normal_cdf(z)

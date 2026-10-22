@@ -22,7 +22,9 @@ def test_advanced_box_request_url_headers_and_timeout():
     response.__enter__.return_value = response
     response.read.return_value = json.dumps(response_payload).encode("utf-8")
     client = CfbdClient(api_key="test-key", timeout=7.0)
-    with patch("cfb_power.ingestion.cfbd_client.urllib.request.urlopen", return_value=response) as urlopen:
+    with patch(
+        "cfb_power.ingestion.cfbd_client.urllib.request.urlopen", return_value=response
+    ) as urlopen:
         assert client.get_advanced_box(GAME_ID) == response_payload
     urlopen.assert_called_once()
     request = urlopen.call_args.args[0]

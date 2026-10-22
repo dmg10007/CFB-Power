@@ -17,7 +17,9 @@ FIXTURES = Path(__file__).parent / "fixtures" / "cfbd"
 @pytest.fixture()
 def payloads():
     games = json.loads((FIXTURES / "canonical_games_401856766.json").read_text(encoding="utf-8"))
-    stats = json.loads((FIXTURES / "canonical_team_stats_401856766.json").read_text(encoding="utf-8"))
+    stats = json.loads(
+        (FIXTURES / "canonical_team_stats_401856766.json").read_text(encoding="utf-8")
+    )
     return games, stats
 
 
@@ -58,12 +60,16 @@ def test_real_sample_mapping_and_neutral_site(payloads):
 
 def test_team_order_and_display_names_do_not_control_identity(payloads):
     games, boxes = payloads
-    expected = normalize_cfbd_canonical(games, boxes)[1].sort_values("team_id").reset_index(drop=True)
+    expected = (
+        normalize_cfbd_canonical(games, boxes)[1].sort_values("team_id").reset_index(drop=True)
+    )
     changed = copy.deepcopy(boxes)
     changed[0]["teams"].reverse()
     for team in changed[0]["teams"]:
         team["team"] = "Renamed program"
-    actual = normalize_cfbd_canonical(games, changed)[1].sort_values("team_id").reset_index(drop=True)
+    actual = (
+        normalize_cfbd_canonical(games, changed)[1].sort_values("team_id").reset_index(drop=True)
+    )
     pd.testing.assert_frame_equal(actual, expected)
 
 
@@ -83,13 +89,21 @@ def test_zero_turnovers_remain_zero(payloads):
     assert stats.loc[153, "takeaways"] == 0
 
 
-@pytest.mark.parametrize("category,value", [
-    ("thirdDownEff", "7/16"), ("thirdDownEff", "17-16"),
-    ("completionAttempts", "33-32"), ("possessionTime", "33:60"),
-    ("possessionTime", "33:2"), ("turnovers", None),
-    ("turnovers", "1.5"), ("rushingAttempts", "-1"),
-    ("totalPenaltiesYards", "11/90"), ("totalYards", "280"),
-])
+@pytest.mark.parametrize(
+    "category,value",
+    [
+        ("thirdDownEff", "7/16"),
+        ("thirdDownEff", "17-16"),
+        ("completionAttempts", "33-32"),
+        ("possessionTime", "33:60"),
+        ("possessionTime", "33:2"),
+        ("turnovers", None),
+        ("turnovers", "1.5"),
+        ("rushingAttempts", "-1"),
+        ("totalPenaltiesYards", "11/90"),
+        ("totalYards", "280"),
+    ],
+)
 def test_malformed_or_inconsistent_statistics_fail(payloads, category, value):
     games, boxes = payloads
     set_stat(boxes, category, value)
@@ -97,12 +111,28 @@ def test_malformed_or_inconsistent_statistics_fail(payloads, category, value):
         normalize_cfbd_canonical(games, boxes)
 
 
-@pytest.mark.parametrize("case", [
-    "duplicate_game", "duplicate_box", "unknown_game", "missing_box",
-    "missing_opponent", "duplicate_team", "wrong_team", "wrong_role",
-    "wrong_score", "duplicate_category", "missing_category", "bad_boolean",
-    "bad_date", "tbd_date", "non_fbs", "unfinished_score", "unfinished_box",
-])
+@pytest.mark.parametrize(
+    "case",
+    [
+        "duplicate_game",
+        "duplicate_box",
+        "unknown_game",
+        "missing_box",
+        "missing_opponent",
+        "duplicate_team",
+        "wrong_team",
+        "wrong_role",
+        "wrong_score",
+        "duplicate_category",
+        "missing_category",
+        "bad_boolean",
+        "bad_date",
+        "tbd_date",
+        "non_fbs",
+        "unfinished_score",
+        "unfinished_box",
+    ],
+)
 def test_invalid_relationships_and_schedule_fail(payloads, case):
     games, boxes = payloads
     team = boxes[0]["teams"][0]

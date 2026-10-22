@@ -8,14 +8,23 @@ import json
 import os
 import shutil
 import sys
-from datetime import datetime, timezone
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from dotenv import load_dotenv
+
 from cfb_power.config import Paths
-from cfb_power.ingestion.cfbd_canonical import PLAY_COUNT_BASIS, normalize_cfbd_canonical, normalize_games
+from cfb_power.ingestion.cfbd_canonical import (
+    PLAY_COUNT_BASIS,
+    normalize_cfbd_canonical,
+    normalize_games,
+)
 from cfb_power.ingestion.cfbd_client import CfbdClient, CfbdHttpError
 from cfb_power.validation import DataValidationError
+
+load_dotenv()
 
 
 class BatchIngestionError(RuntimeError):
@@ -23,7 +32,7 @@ class BatchIngestionError(RuntimeError):
 
 
 def _utc() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _write_json(path: Path, value: dict | list) -> str:
@@ -78,8 +87,14 @@ def _select(payload, season, season_type, week):
 
 
 def ingest_cfbd_batch(
-    *, season: int, season_type: str, week: int | None = None,
-    data_dir: Path | str, max_completed_games: int = 100, client=None,
+    *,
+    season: int,
+    season_type: str,
+    week: int | None = None,
+    data_dir: Path | str,
+    max_completed_games: int = 100,
+    delay_seconds: float = 0.25,
+    client=None,
 ) -> Path:
     """Publish a new snapshot; never activate it or overwrite model input CSVs.
 
@@ -94,17 +109,22 @@ def ingest_cfbd_batch(
         raise ValueError("week must be a nonnegative integer")
     if type(max_completed_games) is not int or max_completed_games < 1:
         raise ValueError("max_completed_games must be positive")
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "-" + uuid4().hex
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + "-" + uuid4().hex
     root = Path(data_dir)
     raw = root / "raw" / "cfbd" / str(season) / run_id
     parent = root / "processed" / "cfbd"
     staging, output = parent / ("." + run_id + ".staging"), parent / run_id
     raw.mkdir(parents=True, exist_ok=False)
     manifest = {
-        "run_id": run_id, "source": "CFBD", "schema_version": "canonical-basic-v1",
-        "started_at_utc": _utc(), "status": "capturing",
+        "run_id": run_id,
+        "source": "CFBD",
+        "schema_version": "canonical-basic-v1",
+        "started_at_utc": _utc(),
+        "status": "capturing",
         "scope": {"season": season, "season_type": season_type, "week": week},
-        "max_completed_games": max_completed_games, "requests": [], "exclusions": [],
+        "max_completed_games": max_completed_games,
+        "requests": [],
+        "exclusions": [],
         "offensive_plays_basis": PLAY_COUNT_BASIS,
         "red_zone_policy": "missing; excluded from baseline rolling features",
     }
@@ -117,10 +137,15 @@ def ingest_cfbd_batch(
         def capture(endpoint, params, filename):
             payload = api.get_json(endpoint, params)
             digest = _write_json(raw / filename, payload)
-            manifest["requests"].append({
-                "endpoint": endpoint, "params": params, "file": filename,
-                "retrieved_at_utc": _utc(), "sha256": digest,
-            })
+            manifest["requests"].append(
+                {
+                    "endpoint": endpoint,
+                    "params": params,
+                    "file": filename,
+                    "retrieved_at_utc": _utc(),
+                    "sha256": digest,
+                }
+            )
             _write_json(audit, manifest)
             return payload
 
@@ -133,15 +158,19 @@ def ingest_cfbd_batch(
         normalize_games(selected)
         completed = [game for game in selected if game["completed"]]
         manifest["counts"] = {
-            "source_games": len(schedule), "selected_games": len(selected),
-            "completed_games": len(completed), "upcoming_games": len(selected) - len(completed),
+            "source_games": len(schedule),
+            "selected_games": len(selected),
+            "completed_games": len(completed),
+            "upcoming_games": len(selected) - len(completed),
             "excluded_games": len(exclusions),
         }
         _write_json(audit, manifest)
         if len(completed) > max_completed_games:
             raise DataValidationError("completed-game request limit exceeded")
         boxes = []
-        for game in completed:
+        for index, game in enumerate(completed):
+            if index > 0 and delay_seconds > 0:
+                time.sleep(delay_seconds)
             game_id = game["id"]
             response = capture("/games/teams", {"id": game_id}, f"box_{game_id}.json")
             if not isinstance(response, list) or len(response) != 1:
@@ -161,7 +190,13 @@ def ingest_cfbd_batch(
             frame.to_csv(path, index=False, na_rep="")
             with path.open("rb") as handle:
                 os.fsync(handle.fileno())
-            outputs.append({"file": filename, "rows": len(frame), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+            outputs.append(
+                {
+                    "file": filename,
+                    "rows": len(frame),
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
+            )
         manifest.update(status="validated", validated_at_utc=_utc(), outputs=outputs)
         _write_json(audit, manifest)
         published_manifest = {**manifest, "status": "ready", "raw_archive": str(raw.resolve())}
@@ -180,7 +215,11 @@ def ingest_cfbd_batch(
             _write_json(audit, manifest)
         except OSError:
             pass
-        detail = str(exc) if isinstance(exc, CfbdHttpError) else f"Ingestion failed ({type(exc).__name__})"
+        detail = (
+            str(exc)
+            if isinstance(exc, (CfbdHttpError, DataValidationError, ValueError))
+            else f"Ingestion failed ({type(exc).__name__})"
+        )
         raise BatchIngestionError(f"{detail}; raw audit: {raw}") from None
 
 
@@ -190,6 +229,13 @@ def main(argv=None) -> int:
     parser.add_argument("--season-type", choices=("regular", "postseason"), required=True)
     parser.add_argument("--week", type=int)
     parser.add_argument("--max-completed-games", type=int, default=100)
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.25,
+        dest="delay_seconds",
+        help="Delay between box requests (seconds)",
+    )
     parser.add_argument("--data-dir", type=Path, default=Paths().data_dir)
     args = parser.parse_args(argv)
     try:
