@@ -1,158 +1,269 @@
 # CFB Power
 
-Team-stat-driven college-football score forecasts with a reproducible Python pipeline and Excel-ready outputs.
+Team-stat-driven college football power rankings, situational matchup forecasting, and automated weekly operations pipeline with an interactive web dashboard and Excel-ready data packages.
 
-## V1 objective
+---
 
-For each FBS matchup, predict expected home and away points using only information available before kickoff. Export a digestible workbook data package containing:
+## Overview
 
-- `predictions.csv` — projected scores, spread, total, home win probability, score intervals, and confidence tier.
-- `team_stats.csv` — pregame rolling team metrics used in the matchup.
-- `historical_results.csv` — locked historical predictions compared with final scores.
-- `model_performance.csv` — score, spread, total, and probability-quality metrics.
-- `cfb_forecast_export.xlsx` — a formatted multi-sheet Excel workbook suitable for dashboard construction and refresh.
+**CFB Power** is an end-to-end college football analytical engine designed to forecast matchup scores, spreads, totals, and win probabilities using only information available prior to kickoff.
 
-V1 deliberately prioritizes team-level statistics and transparent validation. It does not use betting lines, injuries, weather, player projections, or in-game data.
+The system combines:
+1. **Opponent-Adjusted Power Rankings**: An iterative regularized Ridge regression solver determining offensive, defensive, and overall ratings, with strength-of-schedule (SOS) adjustments, recent form weighting, and situational efficiency metrics.
+2. **Automated Weekly Operations Pipeline**: One-step Sunday update cycle that evaluates completed game forecasts, computes adaptive calibrations for Home-Field Advantage (HFA) and margin variance, updates power ratings, and publishes the upcoming slate's forecasts.
+3. **Interactive Web Dashboard**: A 7-tab Streamlit interface for live ratings inspection, head-to-head matchup simulation ("Tale of the Tape"), forecast review, weekly update execution, results grading, and audited data ingestion.
+4. **Immutable Audited Ingestion**: Direct CollegeFootballData (CFBD) API integration with rate-limiting, local raw audit caching with score verification, cryptographic SHA-256 manifests, and human-in-the-loop revision management.
+5. **Digestible Exports**: Multi-sheet formatted Excel workbook (`cfb_forecast_export.xlsx`) and structured CSV outputs for external consumption and visualization.
 
-## Architecture
+---
+
+## Key Features
+
+- **Opponent-Adjusted Ratings**: Iterative Ridge regression solver pre-indexed and vectorized for high performance, decomposing team performance into baseline offensive and defensive strength per possession/play.
+- **Situational Efficiency Analytics**: Tracks yards per play (YPP), 3rd-down conversion rates, red-zone scoring efficiency, and turnover margin per game.
+- **Head-to-Head Matchup Forecaster**: Computes projected scores, point spreads, over/under totals, win probabilities, and confidence tiers, accompanied by automated situational edge summaries.
+- **Adaptive Calibration**: Dynamically adjusts home-field advantage and margin residual standard deviation week-by-week based on observed empirical margins.
+- **Strict No-Leakage Guarantee**: Rolling pregame windows (3-game, 5-game, season-to-date) shifted strictly before kickoff time.
+- **Audited Reproducibility**: Raw API responses are archived immutably with SHA-256 manifests. Stale or conflicting score revisions require explicit human approval before dataset publication.
+- **Multi-Device Dashboard**: Streamlit web dashboard accessible on desktop, mobile, and remote networks (e.g., via Tailscale).
+
+---
+
+## Architecture & Data Pipeline
 
 ```text
-canonical games + team-game statistics
-             ↓
-validation and pregame rolling features
-             ↓
-home-score model + away-score model
-             ↓
-projected score / spread / total / win probability / intervals
-             ↓
-CSV + Excel exports
+       Raw CFBD API Responses (with Local Audit Caching)
+                             ↓
+              Data Validation & Normalization
+         (games.csv, team_game_stats.csv, manifests)
+                             ↓
+       Opponent-Adjusted Power Rankings & Situational Metrics
+                             ↓
+             Adaptive Calibration & Score Models
+            (Dynamic HFA, Margin Residual Std Dev)
+                             ↓
+           Pregame Weekly Forecasts & Matchup Analysis
+       (Projected Scores, Spreads, Totals, Win Probabilities)
+                             ↓
+        Streamlit Web Dashboard  |  Excel Workbook & CSV Exports
 ```
 
-The package does not scrape or call a sports API at import time. API clients belong in an ingestion adapter and raw responses should be saved before normalization. This keeps the model reproducible and prevents credentials from entering the workbook.
+---
 
-## Data contract
+## Setup & Installation
 
-Place normalized files in `data/processed/`:
+### Requirements
+- Python 3.12+
+- Linux, macOS, or Windows WSL
 
-- `games.csv`: `game_id, season, week, game_date, home_team_id, away_team_id, home_score, away_score, neutral_site, completed`
-- `team_game_stats.csv`: `game_id, team_id, opponent_id, is_home, points, points_allowed, total_yards, offensive_plays, passing_yards, rushing_yards, turnovers, takeaways, third_down_attempts, third_down_conversions, red_zone_attempts, red_zone_touchdowns, penalties, penalty_yards, time_of_possession_seconds`
-
-Use stable, source-owned team IDs—not display names—as keys. The feature layer joins game context to team stats and shifts rolling averages so a game never sees its own outcome.
-
-## Setup
+### Installation
 
 ```bash
-python -m venv .venv
+# Clone the repository
+git clone https://github.com/dmg10007/CFB-Power.git
+cd CFB-Power
+
+# Create and activate virtual environment
+python3 -m venv .venv
 source .venv/bin/activate         # Linux/macOS
-# .venv\\Scripts\\Activate.ps1     # Windows PowerShell
+# .venv\Scripts\Activate.ps1      # Windows PowerShell
+
+# Install package in editable mode with development dependencies
 python -m pip install --upgrade pip
 python -m pip install -e '.[dev]'
 ```
 
-Copy `.env.example` to `.env` only when an ingestion adapter requires a key. Do not commit `.env`.
+### Environment Configuration
 
-## First runnable demo
-
-```bash
-cfb-power create-demo-data
-cfb-power train
-cfb-power export-workbook
-pytest
-```
-
-The demo creates synthetic historical data for pipeline verification only; it is not football evidence. Replace it with validated normalized NCAA/CFBD-derived data before evaluating model quality.
-
-## Weekly workflow
-
-1. Ingest source data and archive raw responses.
-2. Normalize and validate completed games plus team-game stats.
-3. Run `cfb-power train` to backtest and create predictions.
-4. Run `cfb-power export-workbook`.
-5. In Excel, use Data → Refresh All if the dashboard workbook is connected to the CSV exports.
-6. Preserve dated outputs; never overwrite historical prediction snapshots.
-
-## Modeling method
-
-- Two regularized Ridge regression models forecast home and away points independently.
-- Pregame rolling metrics use prior games only and include 3-game, 5-game, and season-to-date windows.
-- Matchup features pair home offense with away defense, and away offense with home defense.
-- Residual standard deviation defines initial score intervals.
-- A normal approximation to projected margin produces an initial home win probability.
-- Evaluation reports MAE, RMSE, spread MAE, total MAE, Brier score, and calibration bins.
-
-This is the transparent baseline. Gradient boosting, Elo/strength-of-schedule, and simulation belong in later versions after the data contract and walk-forward process are proven.
-
-## Project layout
-
-```text
-src/cfb_power/        Pipeline package
-data/raw/             Archived API responses; ignored by Git
-data/processed/       Normalized source tables; ignored by Git
-data/exports/         Generated workbook/CSVs; ignored by Git
-models/                Serialized model artifacts; ignored by Git
-tests/                 Unit tests for no-leakage and output contracts
-docs/                  Planning and operating documentation
-```
-
-## CLI Usage
-
-The package exposes the `cfb-power` CLI command (via `src/cfb_power/cli.py`):
+Copy `.env.example` to `.env` to configure API keys and paths:
 
 ```bash
-# Display help and available commands
-cfb-power --help
+cp .env.example .env
+```
 
-# Generate synthetic demonstration dataset
+Key configuration options in `.env`:
+- `CFBD_API_KEY`: Your CollegeFootballData API key (optional for demo data, required for live ingestion).
+- `CFB_DATA_DIR`: Base directory for raw and processed datasets (default: `data/`).
+- `CFB_EXPORT_DIR`: Output directory for CSV and Excel exports (default: `data/exports/`).
+- `CFB_MODEL_DIR`: Directory where serialized models are stored (default: `models/`).
+
+---
+
+## Quick Start
+
+### 1. Synthetic Demo Pipeline (No API Key Required)
+
+Verify the full pipeline in seconds using synthetic data:
+
+```bash
+# Generate synthetic dataset
 cfb-power create-demo-data --seasons 3 --teams 12 --weeks 10
 
 # View opponent-adjusted Power Rankings
-cfb-power power-rankings --top 25
+cfb-power power-rankings --top 10
 
-# Compare any two teams head-to-head (score, spread, win prob, and statistical edges)
-cfb-power compare TEAM_01 TEAM_02 --neutral
+# Compare two teams head-to-head
 cfb-power compare TEAM_01 TEAM_02 --home-team TEAM_01
 
-# Train model pipelines on completed matchups
+# Train score models and export Excel workbook
 cfb-power train
-
-# Export predictions, power rankings, metrics, and formatted Excel workbook
 cfb-power export-workbook
 ```
 
-### Environment Variables
+### 2. Launch the Web Dashboard
 
-You can configure data and model storage directories via environment variables:
-- `CFB_DATA_DIR`: Base directory for raw and processed datasets (default: `data/`).
-- `CFB_EXPORT_DIR`: Output directory for CSV and Excel exports (default: `data/exports/`).
-- `CFB_MODEL_DIR`: Directory where serialized models are persisted (default: `models/`).
-
-## Development and Testing
+Start the interactive Streamlit dashboard:
 
 ```bash
-# Run code formatting
+streamlit run src/cfb_power/dashboard.py
+```
+
+Open `http://localhost:8501` in your browser.
+
+#### Accessing over Tailscale or Local Network
+To view the dashboard on your phone or remote devices via Tailscale:
+
+```bash
+streamlit run src/cfb_power/dashboard.py --server.address 0.0.0.0 --server.port 8501
+```
+
+> [!NOTE]
+> Streamlit uses plain HTTP. When connecting from another device over Tailscale MagicDNS or IP, use `http://<your-tailscale-node>:8501` (avoid `https://`).
+
+#### Native Desktop Launcher (Linux)
+Manage the dashboard as a local background daemon:
+
+```bash
+python -m cfb_power.desktop start     # Launch daemon and open browser
+python -m cfb_power.desktop status    # Check daemon health and port
+python -m cfb_power.desktop stop      # Gracefully shut down daemon
+```
+
+---
+
+## CLI Reference
+
+The package provides the `cfb-power` CLI command:
+
+```bash
+# Display help and all commands
+cfb-power --help
+
+# 1. Power Rankings: View Top 25 opponent-adjusted team ratings
+cfb-power power-rankings --top 25
+cfb-power power-rankings --season 2026 --top 50
+
+# 2. Team Comparison: Head-to-head projection & situational edges
+cfb-power compare "Georgia" "Alabama" --neutral
+cfb-power compare "Ohio State" "Michigan" --home-team "Ohio State"
+
+# 3. Sunday Update: Run automated evaluation, calibration, and next week forecasts
+cfb-power sunday-update --season 2026 --completed-week 7 --upcoming-week 8
+# Or run offline without calling the CFBD API:
+cfb-power sunday-update --season 2026 --completed-week 7 --upcoming-week 8 --offline
+
+# 4. Dataset Management: Activate verified dataset snapshot
+cfb-power activate-dataset [DATASET_ID]
+
+# 5. Model Training & Backtesting
+cfb-power train
+
+# 6. Workbook Export: Generate formatted XLSX and CSV package
+cfb-power export-workbook
+```
+
+---
+
+## Web Dashboard Overview
+
+The dashboard includes 7 dedicated tabs:
+
+1. **🏆 Power Rankings**: Sortable table of all FBS teams with overall rating, offensive/defensive splits, tiers, SOS, recent form, and situational stats (YPP, 3rd down rate, turnover margin).
+2. **⚔️ Matchup Analyzer**: Interactive selector to match up any two FBS teams with neutral/home selection, projected score, spread, total, win probability, key edge summary, and side-by-side "Tale of the Tape".
+3. **📈 Weekly Forecasts**: Published weekly forecast runs with cryptographic SHA-256 manifest verification, slate summary metrics, and export downloads.
+4. **🔄 Sunday Weekly Update**: Automated single-click weekly operations: grades previous week's predictions, adaptively recalibrates HFA and margin variance, updates ratings, and prepares next week's slate.
+5. **📊 Results Report**: Forecast grading against final scores, straight-up accuracy, ATS margin error, Over/Under MAE, and Brier calibration score.
+6. **📥 Ingestion & Revisions**: CFBD batch snapshot ingestion, local raw audit cache inspection, and human-in-the-loop revision diff review.
+7. **⚙️ Settings**: CFBD API credential management and cache controls.
+
+---
+
+## Ingestion & Revisions Workflow
+
+To maintain absolute data integrity:
+
+1. **Raw Snapshot Archiving**: Every API query is saved verbatim to `data/raw/cfbd/<season>/<timestamp>/` alongside a request manifest.
+2. **Box-Score Caching with Verification**: Historical completed game box-scores are cached locally. If team scores change in revision, the cache is automatically invalidated and re-fetched from the API.
+3. **Revision Gatekeeping**: If a subsequent capture of a past week contains score or stat revisions, the ingestion tool flags a `ReviewRequired` state rather than silently overwriting inputs.
+4. **Manifest Fingerprinting**: Published datasets in `data/datasets/` contain SHA-256 checksums for each file to ensure tamper resistance.
+
+---
+
+## Project Structure
+
+```text
+CFB-Power/
+├── src/cfb_power/
+│   ├── cli.py                 # Typer CLI application entry point
+│   ├── config.py              # Path definitions and environment settings
+│   ├── dashboard.py           # Streamlit web application
+│   ├── dashboard_power.py     # Power Rankings & Matchup Analyzer UI components
+│   ├── dataset_workflow.py    # Snapshot activation and dataset management
+│   ├── desktop.py             # Linux desktop launcher daemon
+│   ├── exports.py             # Multi-sheet Excel workbook and CSV export writer
+│   ├── features.py            # Pregame rolling features and matchup joins
+│   ├── model.py               # Ridge regression score models
+│   ├── power_ranking.py       # Iterative Ridge rating solver and matchup comparator
+│   ├── results_report.py      # Historical forecast evaluation and grading
+│   ├── results_ui.py          # Results report dashboard tab
+│   ├── revisions.py           # Snapshot diff verification and review logic
+│   ├── team_names.py          # FBS team ID and display name resolver
+│   ├── upcoming.py            # Next-week prediction pipeline
+│   ├── validation.py          # Data contract validation rules
+│   ├── weekly_update.py       # Automated Sunday cycle and adaptive calibration
+│   └── ingestion/
+│       ├── cfbd_batch.py      # Audited CFBD API batch capture and snapshotting
+│       ├── cfbd_canonical.py  # Raw JSON to canonical CSV transformer
+│       └── cfbd_client.py     # Resilient CFBD HTTP client with rate-limiting
+├── tests/                     # 230+ unit, integration, and offline verification tests
+├── data/
+│   ├── raw/                   # Archived API responses (Git ignored)
+│   ├── datasets/              # Immutable verified dataset snapshots (Git ignored)
+│   ├── processed/             # Active model inputs (Git ignored)
+│   ├── runs/                  # Published weekly forecast runs (Git ignored)
+│   └── exports/               # Generated Excel workbooks & CSVs (Git ignored)
+├── docs/                      # Specification and design documentation
+├── pyproject.toml             # Project metadata, dependencies, and tools
+└── README.md
+```
+
+---
+
+## Development & Quality Assurance
+
+### Code Standards
+The codebase adheres strictly to Ruff linting and formatting standards:
+
+```bash
+# Check formatting
+ruff format --check src tests
+
+# Auto-format code
 ruff format src tests
 
 # Run linter checks
 ruff check src tests
+```
 
-# Execute unit and integration tests
+### Running Tests
+The test suite consists of 239+ tests ensuring no data leakage, strict schema contracts, Ridge mathematical consistency, and offline safety:
+
+```bash
 pytest
 ```
 
-## Contributing
+---
 
-1. Create a feature branch from `main`.
-2. Ensure all new code adheres to style guidelines (`ruff format` and `ruff check`).
-3. Add unit tests covering new functionality or bug fixes.
-4. Verify all tests pass with `pytest`.
-5. Open a pull request with a concise summary of changes.
+## License
 
-## Quality rules
-
-- All model features must be available before kickoff.
-- Never use random row splitting for time-series evaluation.
-- Keep a schema/version record with each exported prediction set.
-- Treat public API wrappers as adapters, not the system of record.
-- Do not embed secret API keys in source code, Excel, or committed configuration.
-
-See `docs/V1_PLAN.md` for implementation milestones and Excel dashboard specification.
+This project is licensed under the MIT License.
