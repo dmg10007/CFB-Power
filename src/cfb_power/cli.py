@@ -29,7 +29,7 @@ def _find_dataset_names(dataset_dir: Path) -> dict[str | int, str]:
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             return _team_names(manifest, [])
-        except Exception:
+        except (OSError, json.JSONDecodeError, KeyError):
             pass
     return {}
 

@@ -202,3 +202,35 @@ def test_invalid_arguments_do_not_call_api(tmp_path, arguments):
     with pytest.raises(ValueError):
         ingest_cfbd_batch(**values)
     client.get_json.assert_not_called()
+
+
+def test_box_score_caching_avoids_repeated_network_calls(tmp_path, responses):
+    client = Mock()
+    # First run: schedule + box score
+    client.get_json.side_effect = list(responses)
+    out1 = ingest_cfbd_batch(
+        season=2026,
+        season_type="regular",
+        week=1,
+        data_dir=tmp_path,
+        client=client,
+    )
+    assert out1.is_dir()
+    assert client.get_json.call_count == 2
+
+    # Second run: schedule returned again, but box score is cached locally
+    client.get_json.reset_mock()
+    client.get_json.side_effect = [responses[0]]  # only schedule response provided!
+    out2 = ingest_cfbd_batch(
+        season=2026,
+        season_type="regular",
+        week=1,
+        data_dir=tmp_path,
+        client=client,
+    )
+    assert out2.is_dir()
+    # api.get_json was called only once for /games; the box score was retrieved from cache
+    assert client.get_json.call_count == 1
+    manifest = json.loads((out2 / "manifest.json").read_text(encoding="utf-8"))
+    box_req = next(r for r in manifest["requests"] if "box_" in r["file"])
+    assert box_req.get("cached") is True

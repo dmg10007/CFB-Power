@@ -21,7 +21,7 @@ def main():
         if mod in sys.modules:
             try:
                 importlib.reload(sys.modules[mod])
-            except Exception:
+            except (ImportError, TypeError):
                 pass
 
     from cfb_power.dashboard_power import (

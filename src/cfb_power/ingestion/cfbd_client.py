@@ -68,12 +68,14 @@ class CfbdClient:
                             body = exc.read().decode("utf-8", errors="replace")
                             if "quota exceeded" in body.lower():
                                 is_monthly_quota = True
-                        except Exception:
+                        except (OSError, UnicodeDecodeError):
                             pass
 
                     if is_monthly_quota:
                         raise CfbdHttpError(
-                            exc.code, path, detail="Monthly call quota exceeded on your CFBD account"
+                            exc.code,
+                            path,
+                            detail="Monthly call quota exceeded on your CFBD account",
                         ) from None
 
                     if attempt < self.max_retries - 1:

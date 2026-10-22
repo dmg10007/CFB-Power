@@ -265,11 +265,7 @@ def _calibrate_model(games_df: pd.DataFrame, eval_summary: dict[str, Any]) -> di
         "calibrated_hfa": max(0.5, min(calibrated_hfa, 5.0)),
         "margin_std": max(8.0, min(emp_margin_std, 20.0)),
         "sample_size": len(completed),
-        "actual_home_margin_avg": round(
-            float((non_neutral["home_score"] - non_neutral["away_score"]).mean()), 2
-        )
-        if len(non_neutral) > 0
-        else 2.5,
+        "actual_home_margin_avg": round(actual_hfa_mean, 2) if len(non_neutral) > 0 else 2.5,
     }
 
 
@@ -296,7 +292,7 @@ def _evaluate_local_week(data_dir: Path, games_df: pd.DataFrame, week: int) -> d
                 matches.append(overlap)
                 if len(overlap) >= len(week_games) * 0.7:
                     break
-        except Exception:
+        except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError, KeyError):
             continue
 
     if not matches:
