@@ -97,6 +97,7 @@ def ingest_cfbd_batch(
     delay_seconds: float = 0.25,
     client=None,
     use_cache: bool = True,
+    capture_lines: bool = False,
 ) -> Path:
     """Publish a new snapshot; never activate it or overwrite model input CSVs.
 
@@ -197,6 +198,14 @@ def ingest_cfbd_batch(
         if week is not None:
             params["week"] = week
         schedule, _ = capture("/games", params, "games.json")
+        if capture_lines:
+            try:
+                lines_params: dict[str, Any] = {"year": season, "seasonType": season_type}
+                if week is not None:
+                    lines_params["week"] = week
+                capture("/lines", lines_params, f"lines_{week or 'all'}.json")
+            except Exception:
+                pass
         selected, exclusions = _select(schedule, season, season_type, week)
         manifest["exclusions"] = exclusions
         normalize_games(selected)

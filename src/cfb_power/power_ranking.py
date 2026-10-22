@@ -55,6 +55,15 @@ class TeamPowerProfile:
     penalty_yards_pg: float = 0.0
     time_of_possession_sec: float = 0.0
 
+    # Conference & advanced efficiency metrics
+    conference: str = "FBS"
+    success_rate: float = 0.0
+    success_rate_allowed: float = 0.0
+    ppa_per_play: float = 0.0
+    ppa_per_play_allowed: float = 0.0
+    explosiveness: float = 0.0
+    havoc_rate: float = 0.0
+
     @property
     def record(self) -> str:
         if self.ties > 0:
@@ -74,6 +83,7 @@ class TeamPowerProfile:
             "rank": self.rank,
             "team_id": self.team_id,
             "team_name": self.display_name,
+            "conference": self.conference,
             "tier": self.tier,
             "record": self.record,
             "power_rating": round(self.power_rating, 2),
@@ -94,6 +104,12 @@ class TeamPowerProfile:
             "penalties_pg": round(self.penalties_pg, 1),
             "penalty_yards_pg": round(self.penalty_yards_pg, 1),
             "time_of_possession_min": round(self.time_of_possession_sec / 60.0, 1),
+            "success_rate": round(self.success_rate, 3),
+            "success_rate_allowed": round(self.success_rate_allowed, 3),
+            "ppa_per_play": round(self.ppa_per_play, 3),
+            "ppa_per_play_allowed": round(self.ppa_per_play_allowed, 3),
+            "explosiveness": round(self.explosiveness, 3),
+            "havoc_rate": round(self.havoc_rate, 3),
         }
 
 
@@ -151,6 +167,7 @@ class PowerRankings:
     home_advantage: float = DEFAULT_HOME_ADVANTAGE
     league_points: float = DEFAULT_LEAGUE_POINTS
     margin_std: float = DEFAULT_MARGIN_STD
+    team_conferences: dict[str | int, str] = field(default_factory=dict)
 
     def get_team(self, team_id: str | int, allow_fallback: bool = True) -> TeamPowerProfile:
         if team_id in self.teams:
@@ -178,6 +195,35 @@ class PowerRankings:
         """Convert all team profiles to a sorted pandas DataFrame."""
         rows = [profile.to_dict() for profile in self.teams.values()]
         return pd.DataFrame(rows).sort_values("rank").reset_index(drop=True)
+
+    def conference_rankings(self) -> pd.DataFrame:
+        """Compute aggregate conference ratings and rankings."""
+        df = self.to_dataframe()
+        if "conference" not in df.columns or df.empty:
+            return pd.DataFrame()
+        grouped = df.groupby("conference")
+        conf_rows = []
+        for conf, g in grouped:
+            if not conf or conf == "Unknown":
+                continue
+            top_row = g.sort_values("power_rating", ascending=False).iloc[0]
+            conf_rows.append(
+                {
+                    "conference": str(conf),
+                    "teams_count": len(g),
+                    "avg_rating": round(float(g["power_rating"].mean()), 2),
+                    "median_rating": round(float(g["power_rating"].median()), 2),
+                    "avg_offense": round(float(g["offensive_rating"].mean()), 2),
+                    "avg_defense": round(float(g["defensive_rating"].mean()), 2),
+                    "top_team": str(top_row["team_name"]),
+                    "top_team_rating": round(float(top_row["power_rating"]), 2),
+                }
+            )
+        conf_df = pd.DataFrame(conf_rows)
+        if not conf_df.empty:
+            conf_df = conf_df.sort_values("avg_rating", ascending=False).reset_index(drop=True)
+            conf_df.insert(0, "rank", range(1, len(conf_df) + 1))
+        return conf_df
 
     def compare_teams(
         self,
@@ -298,91 +344,148 @@ class PowerRankings:
                 f"Turnover Margin: {team_b.display_name} ({team_b.turnover_margin_pg:+.1f}/gm) vs {team_a.display_name} ({team_a.turnover_margin_pg:+.1f}/gm)"
             )
 
+        # Advanced Efficiency & Havoc edges
+        if team_a.success_rate > 0 and team_b.success_rate_allowed > 0:
+            if team_a.success_rate > team_b.success_rate_allowed + 0.04:
+                edges.append(
+                    f"Success Rate: {team_a.display_name} ({team_a.success_rate:.1%}) vs {team_b.display_name} defense ({team_b.success_rate_allowed:.1%})"
+                )
+            elif team_b.success_rate > team_a.success_rate_allowed + 0.04:
+                edges.append(
+                    f"Success Rate: {team_b.display_name} ({team_b.success_rate:.1%}) vs {team_a.display_name} defense ({team_a.success_rate_allowed:.1%})"
+                )
+
+        if team_a.havoc_rate >= 0.15 and team_a.havoc_rate > team_b.havoc_rate + 0.03:
+            edges.append(
+                f"Disruptive Havoc: {team_a.display_name} defense generates {team_a.havoc_rate:.1%} havoc"
+            )
+        elif team_b.havoc_rate >= 0.15 and team_b.havoc_rate > team_a.havoc_rate + 0.03:
+            edges.append(
+                f"Disruptive Havoc: {team_b.display_name} defense generates {team_b.havoc_rate:.1%} havoc"
+            )
+
         # Build side-by-side comparison table
-        stat_table = pd.DataFrame(
-            [
-                {
-                    "Metric": "Power Rank",
-                    team_a.display_name: f"#{team_a.rank}",
-                    team_b.display_name: f"#{team_b.rank}",
-                },
-                {
-                    "Metric": "Power Rating (Net pts)",
-                    team_a.display_name: f"{team_a.power_rating:+.1f}",
-                    team_b.display_name: f"{team_b.power_rating:+.1f}",
-                },
-                {
-                    "Metric": "Tier",
-                    team_a.display_name: team_a.tier,
-                    team_b.display_name: team_b.tier,
-                },
-                {
-                    "Metric": "Record",
-                    team_a.display_name: team_a.record,
-                    team_b.display_name: team_b.record,
-                },
-                {
-                    "Metric": "Offensive Rating",
-                    team_a.display_name: f"{team_a.offensive_rating:+.1f}",
-                    team_b.display_name: f"{team_b.offensive_rating:+.1f}",
-                },
-                {
-                    "Metric": "Defensive Rating",
-                    team_a.display_name: f"{team_a.defensive_rating:+.1f}",
-                    team_b.display_name: f"{team_b.defensive_rating:+.1f}",
-                },
-                {
-                    "Metric": "Strength of Schedule",
-                    team_a.display_name: f"{team_a.strength_of_schedule:+.1f}",
-                    team_b.display_name: f"{team_b.strength_of_schedule:+.1f}",
-                },
-                {
-                    "Metric": "Recent Form Rating",
-                    team_a.display_name: f"{team_a.recent_form_rating:+.1f}",
-                    team_b.display_name: f"{team_b.recent_form_rating:+.1f}",
-                },
-                {
-                    "Metric": "Yards / Play (Off / Def)",
-                    team_a.display_name: f"{team_a.yards_per_play:.2f} / {team_a.yards_per_play_allowed:.2f}",
-                    team_b.display_name: f"{team_b.yards_per_play:.2f} / {team_b.yards_per_play_allowed:.2f}",
-                },
-                {
-                    "Metric": "Pass Yds / Play",
-                    team_a.display_name: f"{team_a.passing_yards_per_play:.2f}",
-                    team_b.display_name: f"{team_b.passing_yards_per_play:.2f}",
-                },
-                {
-                    "Metric": "Rush Yds / Play",
-                    team_a.display_name: f"{team_a.rushing_yards_per_play:.2f}",
-                    team_b.display_name: f"{team_b.rushing_yards_per_play:.2f}",
-                },
-                {
-                    "Metric": "3rd Down % (Off / Def)",
-                    team_a.display_name: f"{team_a.third_down_rate:.1%} / {team_a.third_down_rate_allowed:.1%}",
-                    team_b.display_name: f"{team_b.third_down_rate:.1%} / {team_b.third_down_rate_allowed:.1%}",
-                },
-                {
-                    "Metric": "Red Zone TD % (Off / Def)",
-                    team_a.display_name: f"{team_a.red_zone_td_rate:.1%} / {team_a.red_zone_td_rate_allowed:.1%}",
-                    team_b.display_name: f"{team_b.red_zone_td_rate:.1%} / {team_b.red_zone_td_rate_allowed:.1%}",
-                },
-                {
-                    "Metric": "Turnover Margin / Game",
-                    team_a.display_name: f"{team_a.turnover_margin_pg:+.2f}",
-                    team_b.display_name: f"{team_b.turnover_margin_pg:+.2f}",
-                },
-                {
-                    "Metric": "Penalties / Penalty Yds",
-                    team_a.display_name: f"{team_a.penalties_pg:.1f} / {team_a.penalty_yards_pg:.0f} yds",
-                    team_b.display_name: f"{team_b.penalties_pg:.1f} / {team_b.penalty_yards_pg:.0f} yds",
-                },
-                {
-                    "Metric": "Time of Possession",
-                    team_a.display_name: f"{int(team_a.time_of_possession_sec // 60)}:{int(team_a.time_of_possession_sec % 60):02d}",
-                    team_b.display_name: f"{int(team_b.time_of_possession_sec // 60)}:{int(team_b.time_of_possession_sec % 60):02d}",
-                },
-            ]
-        )
+        rows: list[dict[str, Any]] = [
+            {
+                "Metric": "Power Rank",
+                team_a.display_name: f"#{team_a.rank}",
+                team_b.display_name: f"#{team_b.rank}",
+            },
+            {
+                "Metric": "Conference",
+                team_a.display_name: team_a.conference,
+                team_b.display_name: team_b.conference,
+            },
+            {
+                "Metric": "Power Rating (Net pts)",
+                team_a.display_name: f"{team_a.power_rating:+.1f}",
+                team_b.display_name: f"{team_b.power_rating:+.1f}",
+            },
+            {
+                "Metric": "Tier",
+                team_a.display_name: team_a.tier,
+                team_b.display_name: team_b.tier,
+            },
+            {
+                "Metric": "Record",
+                team_a.display_name: team_a.record,
+                team_b.display_name: team_b.record,
+            },
+            {
+                "Metric": "Offensive Rating",
+                team_a.display_name: f"{team_a.offensive_rating:+.1f}",
+                team_b.display_name: f"{team_b.offensive_rating:+.1f}",
+            },
+            {
+                "Metric": "Defensive Rating",
+                team_a.display_name: f"{team_a.defensive_rating:+.1f}",
+                team_b.display_name: f"{team_b.defensive_rating:+.1f}",
+            },
+            {
+                "Metric": "Strength of Schedule",
+                team_a.display_name: f"{team_a.strength_of_schedule:+.1f}",
+                team_b.display_name: f"{team_b.strength_of_schedule:+.1f}",
+            },
+            {
+                "Metric": "Recent Form Rating",
+                team_a.display_name: f"{team_a.recent_form_rating:+.1f}",
+                team_b.display_name: f"{team_b.recent_form_rating:+.1f}",
+            },
+            {
+                "Metric": "Yards / Play (Off / Def)",
+                team_a.display_name: f"{team_a.yards_per_play:.2f} / {team_a.yards_per_play_allowed:.2f}",
+                team_b.display_name: f"{team_b.yards_per_play:.2f} / {team_b.yards_per_play_allowed:.2f}",
+            },
+            {
+                "Metric": "Pass Yds / Play",
+                team_a.display_name: f"{team_a.passing_yards_per_play:.2f}",
+                team_b.display_name: f"{team_b.passing_yards_per_play:.2f}",
+            },
+            {
+                "Metric": "Rush Yds / Play",
+                team_a.display_name: f"{team_a.rushing_yards_per_play:.2f}",
+                team_b.display_name: f"{team_b.rushing_yards_per_play:.2f}",
+            },
+            {
+                "Metric": "3rd Down % (Off / Def)",
+                team_a.display_name: f"{team_a.third_down_rate:.1%} / {team_a.third_down_rate_allowed:.1%}",
+                team_b.display_name: f"{team_b.third_down_rate:.1%} / {team_b.third_down_rate_allowed:.1%}",
+            },
+            {
+                "Metric": "Red Zone TD % (Off / Def)",
+                team_a.display_name: f"{team_a.red_zone_td_rate:.1%} / {team_a.red_zone_td_rate_allowed:.1%}",
+                team_b.display_name: f"{team_b.red_zone_td_rate:.1%} / {team_b.red_zone_td_rate_allowed:.1%}",
+            },
+            {
+                "Metric": "Turnover Margin / Game",
+                team_a.display_name: f"{team_a.turnover_margin_pg:+.2f}",
+                team_b.display_name: f"{team_b.turnover_margin_pg:+.2f}",
+            },
+            {
+                "Metric": "Penalties / Penalty Yds",
+                team_a.display_name: f"{team_a.penalties_pg:.1f} / {team_a.penalty_yards_pg:.0f} yds",
+                team_b.display_name: f"{team_b.penalties_pg:.1f} / {team_b.penalty_yards_pg:.0f} yds",
+            },
+            {
+                "Metric": "Time of Possession",
+                team_a.display_name: f"{int(team_a.time_of_possession_sec // 60)}:{int(team_a.time_of_possession_sec % 60):02d}",
+                team_b.display_name: f"{int(team_b.time_of_possession_sec // 60)}:{int(team_b.time_of_possession_sec % 60):02d}",
+            },
+        ]
+
+        # Add advanced efficiency rows if metrics are available
+        if (
+            team_a.success_rate > 0
+            or team_b.success_rate > 0
+            or team_a.ppa_per_play != 0
+            or team_b.ppa_per_play != 0
+        ):
+            rows.extend(
+                [
+                    {
+                        "Metric": "Success Rate % (Off / Def)",
+                        team_a.display_name: f"{team_a.success_rate:.1%} / {team_a.success_rate_allowed:.1%}",
+                        team_b.display_name: f"{team_b.success_rate:.1%} / {team_b.success_rate_allowed:.1%}",
+                    },
+                    {
+                        "Metric": "EPA / PPA per Play (Off / Def)",
+                        team_a.display_name: f"{team_a.ppa_per_play:+.3f} / {team_a.ppa_per_play_allowed:+.3f}",
+                        team_b.display_name: f"{team_b.ppa_per_play:+.3f} / {team_b.ppa_per_play_allowed:+.3f}",
+                    },
+                    {
+                        "Metric": "Explosiveness",
+                        team_a.display_name: f"{team_a.explosiveness:.2f}",
+                        team_b.display_name: f"{team_b.explosiveness:.2f}",
+                    },
+                    {
+                        "Metric": "Havoc Rate",
+                        team_a.display_name: f"{team_a.havoc_rate:.1%}",
+                        team_b.display_name: f"{team_b.havoc_rate:.1%}",
+                    },
+                ]
+            )
+
+        stat_table = pd.DataFrame(rows)
 
         return MatchupComparison(
             team_a=team_a,
@@ -494,6 +597,12 @@ def fit_power_rankings(
     games: pd.DataFrame,
     stats: pd.DataFrame,
     team_names: dict[str | int, str] | None = None,
+    team_conferences: dict[str | int, str] | None = None,
+    conference_weight: float = 0.15,
+    advanced_metrics: dict[str | int, dict[str, float]]
+    | pd.DataFrame
+    | list[dict[str, Any]]
+    | None = None,
     priors: dict[str | int, float] | None = None,
     talent_scores: dict[str | int, float] | None = None,
     home_advantage: float = DEFAULT_HOME_ADVANTAGE,
@@ -512,6 +621,40 @@ def fit_power_rankings(
 
     season = int(completed_games["season"].iloc[0])
     max_week = int(completed_games["week"].max())
+
+    # Resolve conference mappings
+    team_conf_map: dict[str | int, str] = {}
+    if team_conferences:
+        team_conf_map.update(team_conferences)
+    else:
+        try:
+            from .team_names import resolve_team_conferences
+
+            team_conf_map = resolve_team_conferences()
+        except Exception:
+            team_conf_map = {}
+
+    def _team_conf(tid: str | int) -> str:
+        name = team_names.get(tid) if team_names else None
+        return (
+            team_conf_map.get(tid)
+            or team_conf_map.get(str(tid))
+            or (name and team_conf_map.get(name))
+            or "FBS"
+        )
+
+    # Resolve advanced metrics lookup
+    adv_lookup: dict[str | int, dict[str, float]] = {}
+    if advanced_metrics is not None:
+        if isinstance(advanced_metrics, (pd.DataFrame, list)):
+            try:
+                from .ingestion.cfbd_advanced import aggregate_advanced_metrics
+
+                adv_lookup = aggregate_advanced_metrics(advanced_metrics)
+            except Exception:
+                adv_lookup = {}
+        elif isinstance(advanced_metrics, dict):
+            adv_lookup = advanced_metrics
 
     # Build per-team box game records
     merged = stats.merge(
@@ -677,16 +820,40 @@ def fit_power_rankings(
         off_ratings = {k: v - avg_off for k, v in new_off.items()}
         def_ratings = {k: v - avg_def for k, v in new_def.items()}
 
-    # Apply Bayesian prior shrinkage for small sample sizes
+    # Calculate raw conference ratings from converged ratings
+    conf_teams: dict[str, list[str | int]] = {}
+    for team in all_teams:
+        c = _team_conf(team)
+        conf_teams.setdefault(c, []).append(team)
+
+    conf_mean_rating: dict[str, float] = {}
+    for c, c_tids in conf_teams.items():
+        ratings = [off_ratings[t] + def_ratings[t] for t in c_tids]
+        conf_mean_rating[c] = float(np.mean(ratings)) if ratings else 0.0
+
+    # Apply Bayesian prior shrinkage with conference strength weighting
     final_power: dict[str | int, float] = {}
     final_off: dict[str | int, float] = {}
     final_def: dict[str | int, float] = {}
     for team in all_teams:
         n = stat_profiles.get(team, {}).get("games_played", 0)
-        p = team_priors.get(team, 0.0)
+        p_base = team_priors.get(team, 0.0)
+        c = _team_conf(team)
+        conf_prior = conf_mean_rating.get(c, 0.0)
+
+        # Conference weighting: blend team talent prior with conference baseline
+        if conference_weight > 0.0 and len(conf_teams) > 1:
+            effective_prior = (1.0 - conference_weight) * p_base + conference_weight * conf_prior
+        else:
+            effective_prior = p_base
+
         denom = n + prior_weight
-        final_off[team] = float((n * off_ratings[team] + (prior_weight * p / 2.0)) / denom)
-        final_def[team] = float((n * def_ratings[team] + (prior_weight * p / 2.0)) / denom)
+        final_off[team] = float(
+            (n * off_ratings[team] + (prior_weight * effective_prior / 2.0)) / denom
+        )
+        final_def[team] = float(
+            (n * def_ratings[team] + (prior_weight * effective_prior / 2.0)) / denom
+        )
         final_power[team] = float(final_off[team] + final_def[team])
 
     # Calculate Strength of Schedule (SOS)
@@ -729,11 +896,18 @@ def fit_power_rankings(
         pr = final_power[team]
         stats_dict = stat_profiles.get(team, {})
         team_name = team_names.get(team) if team_names else None
+        adv_entry = (
+            adv_lookup.get(team)
+            or adv_lookup.get(str(team))
+            or (team_name and adv_lookup.get(team_name))
+            or {}
+        )
 
         profiles[team] = TeamPowerProfile(
             team_id=team,
             team_name=team_name,
             rank=rank,
+            conference=_team_conf(team),
             tier=_assign_tier(pr),
             power_rating=pr,
             offensive_rating=final_off[team],
@@ -759,6 +933,12 @@ def fit_power_rankings(
             penalties_pg=stats_dict.get("penalties_pg", 0.0),
             penalty_yards_pg=stats_dict.get("penalty_yards_pg", 0.0),
             time_of_possession_sec=stats_dict.get("time_of_possession_sec", 0.0),
+            success_rate=adv_entry.get("success_rate", 0.0),
+            success_rate_allowed=adv_entry.get("success_rate_allowed", 0.0),
+            ppa_per_play=adv_entry.get("ppa_per_play", 0.0),
+            ppa_per_play_allowed=adv_entry.get("ppa_per_play_allowed", 0.0),
+            explosiveness=adv_entry.get("explosiveness", 0.0),
+            havoc_rate=adv_entry.get("havoc_rate", 0.0),
         )
 
     return PowerRankings(
@@ -767,4 +947,5 @@ def fit_power_rankings(
         home_advantage=home_advantage,
         league_points=league_points,
         margin_std=margin_std,
+        team_conferences={t: _team_conf(t) for t in all_teams},
     )

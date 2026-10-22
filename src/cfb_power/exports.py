@@ -58,7 +58,7 @@ def _get_cell_style(column_name: str, value: Any) -> tuple[str | None, Alignment
             return "0.000", Alignment(horizontal="right", vertical="center")
 
         # Spreads and score margins
-        if any(k in col_lower for k in ("spread", "margin")):
+        if any(k in col_lower for k in ("spread", "margin", "edge")):
             return "+0.0;-0.0;0.0", Alignment(horizontal="right", vertical="center")
 
         # Ratings, expected scores, averages, and continuous metrics

@@ -20,6 +20,9 @@ The system combines:
 ## Key Features
 
 - **Opponent-Adjusted Ratings**: Iterative Ridge regression solver pre-indexed and vectorized for high performance, decomposing team performance into baseline offensive and defensive strength per possession/play.
+- **Conference Strength Weighting**: Resolves conference affiliations and incorporates empirical conference strength baselines into the Ridge prior shrinkage (`conference_weight=0.15`), appropriately weighting schedule difficulty across conferences.
+- **Advanced Efficiency Metrics**: Ingests and normalizes down-by-down Success Rates, EPA / PPA per play, Explosiveness, and defensive Havoc Rates from CFBD advanced box statistics.
+- **Betting Market Comparison & Value Detection**: Ingests consensus betting lines via CFBD `/lines`, computes model spread and total edges, and highlights value plays in the dashboard and workbook.
 - **Situational Efficiency Analytics**: Tracks yards per play (YPP), 3rd-down conversion rates, red-zone scoring efficiency, and turnover margin per game.
 - **Head-to-Head Matchup Forecaster**: Computes projected scores, point spreads, over/under totals, win probabilities, and confidence tiers, accompanied by automated situational edge summaries.
 - **Adaptive Calibration**: Dynamically adjusts home-field advantage and margin residual standard deviation week-by-week based on observed empirical margins.
@@ -151,6 +154,7 @@ cfb-power --help
 
 # 1. Power Rankings: View Top 25 opponent-adjusted team ratings
 cfb-power power-rankings --top 25
+cfb-power power-rankings --conference SEC --top 16
 cfb-power power-rankings --season 2026 --top 50
 
 # 2. Team Comparison: Head-to-head projection & situational edges

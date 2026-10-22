@@ -37,6 +37,7 @@ class SundayUpdateResult:
     workbook_path: Path = field(default_factory=Path)
     rankings_count: int = 0
     top_teams: list[dict[str, Any]] = field(default_factory=list)
+    conference_rankings: list[dict[str, Any]] = field(default_factory=list)
 
 
 def run_sunday_update(
@@ -66,6 +67,7 @@ def run_sunday_update(
 
     # 1. Ingestion & Dataset Assembly
     dataset_dir: Path | None = None
+    lines_data: list[dict[str, Any]] | None = None
     if not offline and (api_key or client):
         if client is None:
             client = CfbdClient(api_key=api_key)  # type: ignore[arg-type]
@@ -86,6 +88,13 @@ def run_sunday_update(
                 data_dir=data_path,
                 client=client,
             )
+            try:
+                logger(f"Capturing betting market lines for Week {upcoming_week}...")
+                lines_data = client.get_lines(
+                    season=season, week=upcoming_week, season_type="regular"
+                )
+            except Exception as line_err:
+                logger(f"Note: Betting market lines skipped: {line_err}")
             logger("Assembling verified dataset snapshots...")
             snapshots = discover_snapshots(data_path)
             dataset_dir = assemble_or_review(snapshots, data_path)
@@ -181,14 +190,19 @@ def run_sunday_update(
     calibration = _calibrate_model(games_df, eval_summary)
 
     # Fit updated Power Rankings incorporating all completed games through completed_week
+    from .team_names import resolve_team_conferences
+
+    team_confs = resolve_team_conferences(data_path)
     completed_games = games_df[games_df["completed"].astype(bool)].copy()
     rankings: PowerRankings = fit_power_rankings(
         completed_games,
         stats_df,
         team_names=team_names,
+        team_conferences=team_confs,
         home_advantage=calibration["calibrated_hfa"],
     )
     rankings_df = rankings.to_dataframe()
+    conf_df = rankings.conference_rankings()
 
     # 4. Generate Upcoming Slate Predictions using Power Rankings
     logger(f"Generating opponent-adjusted Power Rankings forecasts for Week {upcoming_week}...")
@@ -197,6 +211,7 @@ def run_sunday_update(
         data_dir=data_path,
         min_history_games=min_history_games,
         model="power_rankings",
+        lines_data=lines_data,
     )
 
     # 5. Export Updated Workbook Package
@@ -218,6 +233,7 @@ def run_sunday_update(
     top_teams = rankings_df.head(10)[["rank", "team_name", "power_rating", "tier"]].to_dict(
         orient="records"
     )
+    conf_records = conf_df.to_dict(orient="records") if not conf_df.empty else []
 
     logger(f"Sunday update complete! New forecasts published to {forecast_dir.name}")
 
@@ -233,6 +249,7 @@ def run_sunday_update(
         workbook_path=paths.workbook_xlsx,
         rankings_count=len(rankings_df),
         top_teams=top_teams,
+        conference_rankings=conf_records,
     )
 
 
