@@ -1,0 +1,16 @@
+{
+  "python-formatter": {
+    "PostToolUse": [
+      {
+        "matcher": "edit_file|write_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .agents/scripts/auto_format.py",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
