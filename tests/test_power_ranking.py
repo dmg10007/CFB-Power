@@ -240,3 +240,79 @@ def test_compare_teams_with_individual_adjustments():
     assert adj.projected_spread > base.projected_spread
     assert base.team_a_profile.time_of_possession_min > 0.0
     assert base.team_b_profile.time_of_possession_min > 0.0
+
+
+def test_conference_rankings_and_weighting():
+    games, stats = make_sample_season_data(teams=6, weeks=6)
+    confs = {
+        "TEAM_01": "SEC",
+        "TEAM_02": "SEC",
+        "TEAM_03": "Big Ten",
+        "TEAM_04": "Big Ten",
+        "TEAM_05": "MAC",
+        "TEAM_06": "MAC",
+    }
+    # Fit with conference weighting
+    rankings = fit_power_rankings(
+        games, stats, team_conferences=confs, conference_weight=0.25, prior_weight=4.0
+    )
+    conf_df = rankings.conference_rankings()
+    assert len(conf_df) == 3
+    assert set(conf_df["conference"]) == {"SEC", "Big Ten", "MAC"}
+    assert "avg_rating" in conf_df.columns
+    assert "top_team" in conf_df.columns
+
+    # Verify team profile has conference set
+    p1 = rankings.get_team("TEAM_01")
+    assert p1.conference == "SEC"
+
+    # Fit without conference weighting (conference_weight=0.0)
+    rankings_unweighted = fit_power_rankings(
+        games, stats, team_conferences=confs, conference_weight=0.0, prior_weight=4.0
+    )
+    # The top conference team (in SEC) gets a relative boost under positive conference weight
+    # compared to unweighted baseline
+    p1_weighted = rankings.get_team("TEAM_01").power_rating
+    p1_unweighted = rankings_unweighted.get_team("TEAM_01").power_rating
+    p6_weighted = rankings.get_team("TEAM_06").power_rating
+    p6_unweighted = rankings_unweighted.get_team("TEAM_06").power_rating
+    # Relative spread between SEC and MAC is wider when conference strength is weighted
+    assert (p1_weighted - p6_weighted) > (p1_unweighted - p6_unweighted)
+
+
+def test_advanced_metrics_integration():
+    games, stats = make_sample_season_data(teams=4, weeks=4)
+    adv = {
+        "TEAM_01": {
+            "success_rate": 0.495,
+            "success_rate_allowed": 0.350,
+            "ppa_per_play": 0.245,
+            "ppa_per_play_allowed": -0.050,
+            "explosiveness": 1.25,
+            "havoc_rate": 0.175,
+        },
+        "TEAM_02": {
+            "success_rate": 0.380,
+            "success_rate_allowed": 0.440,
+            "ppa_per_play": 0.050,
+            "ppa_per_play_allowed": 0.120,
+            "explosiveness": 0.95,
+            "havoc_rate": 0.110,
+        },
+    }
+    rankings = fit_power_rankings(games, stats, advanced_metrics=adv)
+    t1 = rankings.get_team("TEAM_01")
+    assert t1.success_rate == 0.495
+    assert t1.ppa_per_play == 0.245
+    assert t1.havoc_rate == 0.175
+
+    comp = rankings.compare_teams("TEAM_01", "TEAM_02", neutral_site=True)
+    table_metrics = list(comp.stat_comparison["Metric"])
+    assert "Success Rate % (Off / Def)" in table_metrics
+    assert "EPA / PPA per Play (Off / Def)" in table_metrics
+    assert "Explosiveness" in table_metrics
+    assert "Havoc Rate" in table_metrics
+
+    # Edge analysis should pick up the efficiency and havoc edges
+    edges_str = " ".join(comp.edge_summary)
+    assert "Success Rate" in edges_str or "Havoc" in edges_str

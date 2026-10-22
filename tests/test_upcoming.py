@@ -351,3 +351,36 @@ def test_cli_prints_forecasts_and_reports_failures(tmp_path, capsys):
         == 1
     )
     assert "Upcoming predictions failed" in capsys.readouterr().err
+
+
+def test_predict_upcoming_with_market_lines(tmp_path):
+    games, stats = make_tables()
+    up_games, up_stats = make_upcoming(games, stats)
+    dataset = write_dataset(tmp_path, up_games, up_stats)
+    as_of = week_kickoff(games, 6) - pd.Timedelta(days=1)
+
+    # Provide market lines for game_id 41
+    lines_data = [
+        {
+            "id": 41,
+            "homeTeam": "101",
+            "awayTeam": "102",
+            "lines": [
+                {"provider": "consensus", "spread": -4.5, "overUnder": 53.5},
+            ],
+        }
+    ]
+
+    run = predict_upcoming(
+        dataset,
+        tmp_path,
+        as_of=as_of,
+        lines_data=lines_data,
+    )
+    preds = pd.read_csv(run / "predictions.csv").set_index("game_id")
+    row_41 = preds.loc[41]
+    assert row_41["market_spread"] == -4.5
+    assert row_41["market_total"] == 53.5
+    assert not pd.isna(row_41["spread_edge"])
+    assert not pd.isna(row_41["total_edge"])
+    assert row_41["value_tier"] in ("Strong Value", "Moderate Value", "Fair / Aligned")

@@ -152,13 +152,22 @@ def main():
                 m4.metric("Home Teams Favored", f"{home_fav_pct:.1%}")
 
                 # Filtering
-                f1, f2 = st.columns([3, 1])
+                f1, f2, f3 = st.columns([3, 1, 1])
                 with f1:
                     filter_q = st.text_input("🔍 Filter games by team name", key="forecast_filter")
                 with f2:
+                    only_value = st.checkbox(
+                        "🎯 Value Plays Only",
+                        help="Filter to matchups with ≥ 2.0 pts spread or total edge against the market",
+                    )
+                with f3:
                     view_mode = st.radio("View", ["Table", "Cards"], horizontal=True)
 
                 display_df = preds
+                if only_value and "value_tier" in display_df.columns:
+                    display_df = display_df[
+                        display_df["value_tier"].isin(["Strong Value", "Moderate Value"])
+                    ]
                 if filter_q.strip():
                     display_df = display_df[
                         display_df["home_team"].str.contains(filter_q, case=False, na=False)
@@ -182,6 +191,25 @@ def main():
                     "projected_total": st.column_config.NumberColumn("Total", format="%.1f"),
                     "home_win_probability": st.column_config.ProgressColumn(
                         "Home Win %", format="%.1f%%", min_value=0.0, max_value=1.0
+                    ),
+                    "market_spread": st.column_config.NumberColumn(
+                        "Market Spread", format="%+.1f", help="Market consensus line (Home spread)"
+                    ),
+                    "spread_edge": st.column_config.NumberColumn(
+                        "Spread Edge",
+                        format="%+.1f",
+                        help="Positive = Edge on Home covering; Negative = Edge on Away",
+                    ),
+                    "market_total": st.column_config.NumberColumn(
+                        "Market O/U", format="%.1f", help="Market consensus Over/Under"
+                    ),
+                    "total_edge": st.column_config.NumberColumn(
+                        "Total Edge",
+                        format="%+.1f",
+                        help="Positive = Edge on OVER; Negative = Edge on UNDER",
+                    ),
+                    "value_tier": st.column_config.TextColumn(
+                        "Value Tier", width="small", help="Value rating relative to market line"
                     ),
                     "low_history": st.column_config.CheckboxColumn("Low History"),
                 }
@@ -218,6 +246,27 @@ def main():
                                     else f"{away_name} -{-spread_val:.1f}"
                                 )
 
+                                m_spread_val = game.get("market_spread")
+                                s_edge_val = game.get("spread_edge")
+                                v_tier_val = game.get("value_tier")
+                                market_html = ""
+                                if m_spread_val is not None and not pd.isna(m_spread_val):
+                                    badge_color = (
+                                        "#10B981"
+                                        if v_tier_val == "Strong Value"
+                                        else (
+                                            "#F59E0B"
+                                            if v_tier_val == "Moderate Value"
+                                            else "#64748B"
+                                        )
+                                    )
+                                    market_html = f"""
+                                        <div style="font-size: 12px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed #E2E8F0; display: flex; justify-content: space-between;">
+                                            <span><strong>Market:</strong> {m_spread_val:+.1f} (Edge: {s_edge_val:+.1f})</span>
+                                            <span style="color: {badge_color}; font-weight: bold;">🎯 {v_tier_val}</span>
+                                        </div>
+                                    """
+
                                 st.markdown(
                                     f"""
                                     <div style="border: 1px solid #E2E8F0; border-radius: 8px; padding: 14px; margin-bottom: 12px; background: #FAFAFA;">
@@ -227,12 +276,13 @@ def main():
                                         </div>
                                         <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                                             <div><strong>Proj Score:</strong> {away_pts:.0f} - {home_pts:.0f}</div>
-                                            <div><strong>Line:</strong> {favored_str}</div>
+                                            <div><strong>Model Line:</strong> {favored_str}</div>
                                             <div><strong>O/U:</strong> {total_val:.1f}</div>
                                         </div>
                                         <div style="font-size: 12px; color: #475569;">
                                             Win Probability: {home_name} <strong>{prob_val:.1%}</strong> · {away_name} <strong>{1.0 - prob_val:.1%}</strong>
                                         </div>
+                                        {market_html}
                                     </div>
                                     """,
                                     unsafe_allow_html=True,

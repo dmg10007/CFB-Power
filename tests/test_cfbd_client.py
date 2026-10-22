@@ -32,3 +32,12 @@ def test_advanced_box_request_url_headers_and_timeout():
     assert request.get_header("Authorization") == "Bearer test-key"
     assert request.get_header("Accept") == "application/json"
     assert urlopen.call_args.kwargs == {"timeout": 7.0}
+
+
+def test_get_lines_calls_lines_endpoint():
+    client = CfbdClient(api_key="test-key")
+    response = [{"id": 1, "lines": []}]
+    with patch.object(client, "get_json", return_value=response) as get_json:
+        result = client.get_lines(season=2026, week=8)
+    assert result is response
+    get_json.assert_called_once_with("/lines", {"year": 2026, "seasonType": "regular", "week": 8})

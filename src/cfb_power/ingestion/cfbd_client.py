@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_URL = "https://api.collegefootballdata.com"
-SAFE_ENDPOINTS = frozenset({"/games", "/games/teams", "/game/box/advanced", "/teams"})
+SAFE_ENDPOINTS = frozenset({"/games", "/games/teams", "/game/box/advanced", "/teams", "/lines"})
 
 
 class CfbdHttpError(RuntimeError):
@@ -90,3 +90,11 @@ class CfbdClient:
 
     def get_advanced_box(self, game_id: int) -> Any:
         return self.get_json("/game/box/advanced", {"id": game_id})
+
+    def get_lines(
+        self, season: int, week: int | None = None, season_type: str = "regular"
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"year": season, "seasonType": season_type}
+        if week is not None:
+            params["week"] = week
+        return self.get_json("/lines", params)

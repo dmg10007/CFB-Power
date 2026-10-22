@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from .power_ranking import MatchupComparison, PowerRankings, fit_power_rankings
-from .team_names import resolve_team_names
+from .team_names import resolve_team_conferences, resolve_team_names
 
 
 def _get_active_source_paths(data_dir: Path) -> tuple[Path | None, Path | None, float]:
@@ -50,7 +50,10 @@ def load_power_rankings_resource(
         games = pd.read_csv(games_csv)
         stats = pd.read_csv(stats_csv)
         names = resolve_team_names(data_dir)
-        rankings = fit_power_rankings(games, stats, team_names=names)
+        confs = resolve_team_conferences(data_dir)
+        rankings = fit_power_rankings(
+            games, stats, team_names=names, team_conferences=confs, conference_weight=0.15
+        )
         df = rankings.to_dataframe()
         return rankings, df, names
     except Exception:
@@ -110,7 +113,7 @@ def render_power_rankings_tab(
     )
 
     # Filter Controls
-    fc1, fc2 = st.columns([2, 1])
+    fc1, fc2, fc3 = st.columns([2, 1, 1])
     with fc1:
         search_query = st.text_input(
             "🔍 Search team name", placeholder="e.g. Ohio State, Georgia, Alabama..."
@@ -118,8 +121,17 @@ def render_power_rankings_tab(
     with fc2:
         available_tiers = list(rankings_df["tier"].unique())
         selected_tiers = st.multiselect("Filter by Tier", available_tiers, default=available_tiers)
+    with fc3:
+        confs_list = (
+            ["All"] + sorted([c for c in rankings_df["conference"].unique() if c])
+            if "conference" in rankings_df.columns
+            else ["All"]
+        )
+        selected_conf = st.selectbox("Conference", confs_list)
 
     filtered_df = rankings_df[rankings_df["tier"].isin(selected_tiers)]
+    if selected_conf != "All" and "conference" in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df["conference"] == selected_conf]
     if search_query.strip():
         filtered_df = filtered_df[
             filtered_df["team_name"].str.contains(search_query.strip(), case=False, na=False)
@@ -129,6 +141,7 @@ def render_power_rankings_tab(
     column_config = {
         "rank": st.column_config.NumberColumn("Rank", format="#%d", width="small"),
         "team_name": st.column_config.TextColumn("Team", width="medium"),
+        "conference": st.column_config.TextColumn("Conf", width="small"),
         "tier": st.column_config.TextColumn("Tier", width="small"),
         "record": st.column_config.TextColumn("Record", width="small"),
         "power_rating": st.column_config.NumberColumn(
@@ -152,6 +165,11 @@ def render_power_rankings_tab(
         "yards_per_play_allowed": st.column_config.NumberColumn("Yds/Play Def", format="%.2f"),
         "third_down_rate": st.column_config.NumberColumn("3rd Down %", format="%.1f%%"),
         "third_down_rate_allowed": st.column_config.NumberColumn("3rd Down Def %", format="%.1f%%"),
+        "success_rate": st.column_config.NumberColumn("Success Rate Off", format="%.1f%%"),
+        "success_rate_allowed": st.column_config.NumberColumn("Success Rate Def", format="%.1f%%"),
+        "ppa_per_play": st.column_config.NumberColumn("EPA/Play Off", format="%+.3f"),
+        "ppa_per_play_allowed": st.column_config.NumberColumn("EPA/Play Def", format="%+.3f"),
+        "havoc_rate": st.column_config.NumberColumn("Havoc Rate", format="%.1f%%"),
         "red_zone_td_rate": st.column_config.NumberColumn("RZ TD %", format="%.1f%%"),
         "red_zone_td_rate_allowed": st.column_config.NumberColumn("RZ TD Def %", format="%.1f%%"),
         "turnover_margin_pg": st.column_config.NumberColumn("TO Margin/G", format="%+.2f"),
@@ -165,6 +183,29 @@ def render_power_rankings_tab(
         use_container_width=True,
         hide_index=True,
     )
+
+    if rankings is not None:
+        conf_df = rankings.conference_rankings()
+        if not conf_df.empty and len(conf_df) > 1:
+            with st.expander("🏛️ Conference Strength Rankings Hierarchy", expanded=False):
+                st.dataframe(
+                    conf_df,
+                    column_config={
+                        "rank": st.column_config.NumberColumn("Rank", format="#%d"),
+                        "conference": st.column_config.TextColumn("Conference"),
+                        "teams_count": st.column_config.NumberColumn("Teams"),
+                        "avg_rating": st.column_config.NumberColumn("Avg Rating", format="%+.2f"),
+                        "median_rating": st.column_config.NumberColumn("Median", format="%+.2f"),
+                        "avg_offense": st.column_config.NumberColumn("Avg Off", format="%+.2f"),
+                        "avg_defense": st.column_config.NumberColumn("Avg Def", format="%+.2f"),
+                        "top_team": st.column_config.TextColumn("Top Team"),
+                        "top_team_rating": st.column_config.NumberColumn(
+                            "Top Rating", format="%+.2f"
+                        ),
+                    },
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
     st.download_button(
         "📥 Download Power Rankings (CSV)",

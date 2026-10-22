@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -93,8 +94,13 @@ def _format_workbook(path: Path, predictions: pd.DataFrame, readme: list) -> Non
         "away_expected_points",
         "projected_spread_home",
         "projected_total",
+        "market_spread",
+        "market_total",
+        "spread_edge",
+        "total_edge",
     ):
-        display[column] = display[column].round(1)
+        if column in display.columns and pd.api.types.is_numeric_dtype(display[column]):
+            display[column] = display[column].round(1)
     display["home_win_probability"] = display["home_win_probability"].round(3)
     sheet.append(list(display.columns))
     for row in display.itertuples(index=False, name=None):
@@ -122,6 +128,7 @@ def predict_upcoming(
     as_of=None,
     min_history_games: int = DEFAULT_MIN_HISTORY_GAMES,
     model: str = "power_rankings",
+    lines_data: list[dict[str, Any]] | None = None,
 ) -> Path:
     """Forecast not-yet-started games from completed games played before their kickoff.
 
@@ -174,6 +181,30 @@ def predict_upcoming(
             is_power_model = False
             model_label = "rolling_average"
 
+    market_lines: dict[str | int | tuple[str, str], dict[str, Any]] = {}
+    if lines_data is not None:
+        try:
+            from .market import parse_consensus_lines
+
+            market_lines = parse_consensus_lines(lines_data)
+        except Exception:
+            market_lines = {}
+    else:
+        for item in manifest.get("inputs", []):
+            try:
+                snap_manifest = Path(item["path"]) / "manifest.json"
+                if snap_manifest.is_file():
+                    sm = json.loads(snap_manifest.read_text(encoding="utf-8"))
+                    raw_arch = Path(sm.get("raw_archive", ""))
+                    for lines_candidate in raw_arch.glob("lines*.json"):
+                        if lines_candidate.is_file():
+                            raw_lines = json.loads(lines_candidate.read_text(encoding="utf-8"))
+                            from .market import parse_consensus_lines
+
+                            market_lines.update(parse_consensus_lines(raw_lines))
+            except Exception:
+                pass
+
     rows, skipped = [], []
     for game in upcoming.sort_values(["game_date", "game_id"]).itertuples(index=False):
         if not (pd.isna(game.home_score) and pd.isna(game.away_score)):
@@ -224,6 +255,27 @@ def predict_upcoming(
                 score_high_a = round(away + scale / 1.4, 1)
                 conf_tier = "Low"
 
+            from .market import compute_market_edges
+
+            line_entry = (
+                market_lines.get(game.game_id)
+                or market_lines.get(str(game.game_id))
+                or (
+                    home_team_name
+                    and away_team_name
+                    and market_lines.get((home_team_name.lower(), away_team_name.lower()))
+                )
+                or {}
+            )
+            m_spread = line_entry.get("market_spread")
+            m_total = line_entry.get("market_total")
+            edges = compute_market_edges(
+                projected_home_points=home,
+                projected_away_points=away,
+                market_spread=m_spread,
+                market_total=m_total,
+            )
+
             rows.append(
                 {
                     "game_id": game.game_id,
@@ -247,6 +299,11 @@ def predict_upcoming(
                     "away_score_low": score_low_a,
                     "away_score_high": score_high_a,
                     "confidence_tier": conf_tier,
+                    "market_spread": m_spread,
+                    "market_total": m_total,
+                    "spread_edge": edges["spread_edge"],
+                    "total_edge": edges["total_edge"],
+                    "value_tier": edges["value_tier"],
                     "model": model_label,
                 }
             )

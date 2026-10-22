@@ -264,6 +264,9 @@ def activate_dataset(
 def power_rankings(
     top: int = typer.Option(25, min=1, help="Number of teams to display"),
     season: int | None = typer.Option(None, help="Filter to specific season"),
+    conference: str | None = typer.Option(
+        None, "--conference", "-c", help="Filter to specific conference (e.g. SEC, Big Ten)"
+    ),
     dataset: str | None = typer.Option(
         None,
         "--dataset",
@@ -279,13 +282,18 @@ def power_rankings(
     rankings = fit_power_rankings(games, stats, team_names=names)
     df = rankings.to_dataframe()
 
+    if conference is not None:
+        df = df[df["conference"].astype(str).str.lower() == conference.lower()]
+
     table = Table(
-        title=f"CFB Power Rankings ({rankings.season})",
+        title=f"CFB Power Rankings ({rankings.season})"
+        + (f" - {conference}" if conference else ""),
         show_header=True,
         header_style="bold cyan",
     )
     table.add_column("Rank", justify="right", style="bold")
     table.add_column("Team", style="bold white")
+    table.add_column("Conf", style="cyan")
     table.add_column("Rating", justify="right", style="green")
     table.add_column("Tier", style="yellow")
     table.add_column("Record", justify="center")
@@ -301,6 +309,7 @@ def power_rankings(
         table.add_row(
             str(row["rank"]),
             str(row["team_name"]),
+            str(row.get("conference", "FBS")),
             f"{row['power_rating']:+.1f}",
             str(row["tier"]).replace("Tier ", "T"),
             str(row["record"]),
@@ -454,6 +463,25 @@ def sunday_update(
             str(t["rank"]), str(t["team_name"]), f"{t['power_rating']:+.2f}", str(t["tier"])
         )
     console.print(table)
+
+    if result.conference_rankings:
+        conf_table = Table(
+            title="Conference Power Rankings", show_header=True, header_style="bold cyan"
+        )
+        conf_table.add_column("Rank", justify="center")
+        conf_table.add_column("Conference", style="bold")
+        conf_table.add_column("Avg Rating", justify="right")
+        conf_table.add_column("Top Team", style="green")
+        conf_table.add_column("Top Rating", justify="right")
+        for cr in result.conference_rankings:
+            conf_table.add_row(
+                str(cr["rank"]),
+                str(cr["conference"]),
+                f"{cr['avg_rating']:+.2f}",
+                str(cr["top_team"]),
+                f"{cr['top_team_rating']:+.2f}",
+            )
+        console.print(conf_table)
 
     console.print(f"[bold green]✓ Week {upcoming_week} forecasts ready:[/] {result.forecast_dir}")
     console.print(f"[bold green]✓ Updated Excel workbook:[/] {result.workbook_path}")

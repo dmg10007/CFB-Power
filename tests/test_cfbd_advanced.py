@@ -4,7 +4,10 @@ from pathlib import Path
 import pytest
 
 from cfb_power.advanced_schema import AdvancedSchemaError
-from cfb_power.ingestion.cfbd_advanced import normalize_advanced_box
+from cfb_power.ingestion.cfbd_advanced import (
+    aggregate_advanced_metrics,
+    normalize_advanced_box,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "cfbd" / "advanced_box_verified_shape.json"
 
@@ -41,3 +44,18 @@ def test_missing_teams_raises():
 def test_entry_without_team_name_raises():
     with pytest.raises(AdvancedSchemaError):
         normalize_advanced_box({"teams": {"ppa": [{"plays": 1}]}}, 1)
+
+
+def test_aggregate_advanced_metrics(payload):
+    rows = normalize_advanced_box(payload, game_id=1)
+    metrics = aggregate_advanced_metrics(rows)
+    assert "Alpha" in metrics
+    assert "Beta" in metrics
+
+    alpha = metrics["Alpha"]
+    assert alpha["ppa_per_play"] == pytest.approx(0.2)
+    assert alpha["success_rate"] == pytest.approx(0.45)
+    assert alpha["havoc_rate"] == pytest.approx(0.1)
+    # Opponent metrics allowed
+    assert "success_rate_allowed" in alpha
+    assert "ppa_per_play_allowed" in alpha
