@@ -532,13 +532,21 @@ def fit_power_rankings(
     merged["recency_weight"] = recency_decay ** (max_week - merged["week"]).clip(lower=0)
     merged["recent_form_weight"] = 0.78 ** (max_week - merged["week"]).clip(lower=0)
 
+    # Pre-index team and opponent records for fast O(1) retrieval
+    team_games_map: dict[str | int, pd.DataFrame] = {
+        tid: sub for tid, sub in merged.groupby("team_id")
+    }
+    opp_games_map: dict[str | int, pd.DataFrame] = {
+        oid: sub for oid, sub in merged.groupby("opponent_id")
+    }
+
     # Compile basic win/loss/tie and statistical efficiency metrics for each team
     stat_profiles: dict[str | int, dict[str, Any]] = {}
     for team_id in all_teams:
-        team_rows = merged[merged["team_id"] == team_id]
-        n_games = len(team_rows)
-        if n_games == 0:
+        team_rows = team_games_map.get(team_id)
+        if team_rows is None or team_rows.empty:
             continue
+        n_games = len(team_rows)
 
         wins = int((team_rows["points"] > team_rows["points_allowed"]).sum())
         losses = int((team_rows["points"] < team_rows["points_allowed"]).sum())
@@ -563,15 +571,21 @@ def fit_power_rankings(
         tot_top = float(team_rows["time_of_possession_seconds"].sum())
 
         # Opponent stats allowed
-        opp_games = merged[
-            (merged["opponent_id"] == team_id) & (merged["game_id"].isin(team_rows["game_id"]))
-        ]
-        opp_plays = float(opp_games["offensive_plays"].sum())
-        opp_yds = float(opp_games["total_yards"].sum())
-        opp_3rd_att = float(opp_games["third_down_attempts"].sum())
-        opp_3rd_conv = float(opp_games["third_down_conversions"].sum())
-        opp_rz_att = float(opp_games["red_zone_attempts"].sum())
-        opp_rz_td = float(opp_games["red_zone_touchdowns"].sum())
+        opp_candidates = opp_games_map.get(team_id)
+        if opp_candidates is not None and not opp_candidates.empty:
+            team_game_ids = set(team_rows["game_id"])
+            opp_games = opp_candidates[opp_candidates["game_id"].isin(team_game_ids)]
+        else:
+            opp_games = pd.DataFrame()
+
+        opp_plays = float(opp_games["offensive_plays"].sum()) if not opp_games.empty else 0.0
+        opp_yds = float(opp_games["total_yards"].sum()) if not opp_games.empty else 0.0
+        opp_3rd_att = float(opp_games["third_down_attempts"].sum()) if not opp_games.empty else 0.0
+        opp_3rd_conv = (
+            float(opp_games["third_down_conversions"].sum()) if not opp_games.empty else 0.0
+        )
+        opp_rz_att = float(opp_games["red_zone_attempts"].sum()) if not opp_games.empty else 0.0
+        opp_rz_td = float(opp_games["red_zone_touchdowns"].sum()) if not opp_games.empty else 0.0
 
         stat_profiles[team_id] = {
             "games_played": n_games,
@@ -614,27 +628,38 @@ def fit_power_rankings(
     # Iterative Opponent Adjustment Solver
     # Points = League_Mean + Offense_Team - Defense_Opponent + HFA
     ridge_lambda = 4.0
+
+    # Pre-extract numpy matrices for each team to avoid repeated DataFrame slicing inside solver loop
+    team_solver_data: dict[
+        str | int, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[Any], float]
+    ] = {}
+    for team in all_teams:
+        rows = team_games_map.get(team)
+        if rows is None or len(rows) == 0:
+            continue
+        weights = rows["recency_weight"].to_numpy()
+        pts = rows["points"].to_numpy()
+        pts_allowed = rows["points_allowed"].to_numpy()
+        is_neutral = rows["neutral_site"].astype(bool).to_numpy()
+        is_home = rows["is_home"].astype(bool).to_numpy()
+        hfa_term = np.where(
+            is_neutral, 0.0, np.where(is_home, home_advantage / 2.0, -home_advantage / 2.0)
+        )
+        opps = rows["opponent_id"].tolist()
+        denom = float(np.sum(weights) + ridge_lambda)
+        team_solver_data[team] = (weights, pts, pts_allowed, hfa_term, opps, denom)
+
     for _ in range(iterations):
         new_off = {}
         new_def = {}
         for team in all_teams:
-            rows = merged[merged["team_id"] == team]
-            if len(rows) == 0:
+            solver_entry = team_solver_data.get(team)
+            if solver_entry is None:
                 new_off[team] = off_ratings[team]
                 new_def[team] = def_ratings[team]
                 continue
 
-            weights = rows["recency_weight"].to_numpy()
-            pts = rows["points"].to_numpy()
-            pts_allowed = rows["points_allowed"].to_numpy()
-            is_neutral = rows["neutral_site"].astype(bool).to_numpy()
-            is_home = rows["is_home"].astype(bool).to_numpy()
-
-            hfa_term = np.where(
-                is_neutral, 0.0, np.where(is_home, home_advantage / 2.0, -home_advantage / 2.0)
-            )
-            opps = rows["opponent_id"].tolist()
-
+            weights, pts, pts_allowed, hfa_term, opps, denom = solver_entry
             opp_def = np.array([def_ratings.get(opp, 0.0) for opp in opps])
             opp_off = np.array([off_ratings.get(opp, 0.0) for opp in opps])
 
@@ -643,7 +668,6 @@ def fit_power_rankings(
             # Defense: how much below (League - HFA + Opp_Off) did team allow?
             def_numer = np.sum(weights * ((league_points - hfa_term) - pts_allowed + opp_off))
 
-            denom = np.sum(weights) + ridge_lambda
             new_off[team] = float(off_numer / denom)
             new_def[team] = float(def_numer / denom)
 
@@ -668,8 +692,8 @@ def fit_power_rankings(
     # Calculate Strength of Schedule (SOS)
     sos_dict: dict[str | int, float] = {}
     for team in all_teams:
-        rows = merged[merged["team_id"] == team]
-        if len(rows) > 0:
+        rows = team_games_map.get(team)
+        if rows is not None and len(rows) > 0:
             opp_ratings = [final_power.get(opp, 0.0) for opp in rows["opponent_id"]]
             sos_dict[team] = float(np.mean(opp_ratings))
         else:
@@ -678,8 +702,8 @@ def fit_power_rankings(
     # Calculate Recent Form Rating (higher decay on recent 3-4 games)
     recent_form: dict[str | int, float] = {}
     for team in all_teams:
-        rows = merged[merged["team_id"] == team]
-        if len(rows) > 0:
+        rows = team_games_map.get(team)
+        if rows is not None and len(rows) > 0:
             recent_weights = rows["recent_form_weight"].to_numpy()
             margin = (rows["points"] - rows["points_allowed"]).to_numpy()
             hfa_offset = np.where(

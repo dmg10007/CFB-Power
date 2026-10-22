@@ -48,7 +48,7 @@ def _sha256(path: Path) -> str:
 
 def _write_json(path: Path, value: dict) -> str:
     content = (json.dumps(value, indent=2, allow_nan=False) + "\n").encode("utf-8")
-    temporary = path.with_name(path.name + ".tmp")
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.{uuid4().hex[:8]}.tmp")
     try:
         with temporary.open("xb") as handle:
             handle.write(content)

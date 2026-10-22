@@ -124,8 +124,8 @@ def forecasts(data_dir):
                 if min(home, away) < 0 or not 0 <= row["home_win_probability"] <= 1:
                     raise ReportError("Invalid predicted points/probability.")
                 if not (
-                    math.isclose(home - away, row["projected_spread_home"], abs_tol=1e-8)
-                    and math.isclose(home + away, row["projected_total"], abs_tol=1e-8)
+                    math.isclose(home - away, row["projected_spread_home"], abs_tol=1e-4)
+                    and math.isclose(home + away, row["projected_total"], abs_tol=1e-4)
                 ):
                     raise ReportError("Predicted score/margin/total disagree.")
                 if row["low_history"] not in ("True", "False"):

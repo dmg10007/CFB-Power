@@ -11,6 +11,7 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -37,7 +38,7 @@ def _utc() -> str:
 
 def _write_json(path: Path, value: dict | list) -> str:
     content = (json.dumps(value, indent=2, allow_nan=False) + "\n").encode("utf-8")
-    temporary = path.with_name(path.name + ".tmp")
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.{uuid4().hex[:8]}.tmp")
     try:
         with temporary.open("xb") as handle:
             handle.write(content)
@@ -95,6 +96,7 @@ def ingest_cfbd_batch(
     max_completed_games: int = 100,
     delay_seconds: float = 0.25,
     client=None,
+    use_cache: bool = True,
 ) -> Path:
     """Publish a new snapshot; never activate it or overwrite model input CSVs.
 
@@ -134,25 +136,67 @@ def ingest_cfbd_batch(
         _write_json(audit, manifest)
         api = client if client is not None else CfbdClient()
 
-        def capture(endpoint, params, filename):
-            payload = api.get_json(endpoint, params)
+        def capture(
+            endpoint,
+            params,
+            filename,
+            can_cache: bool = False,
+            expected_scores: tuple[Any, Any] | None = None,
+        ):
+            payload = None
+            from_cache = False
+            if can_cache and use_cache:
+                raw_season_dir = root / "raw" / "cfbd" / str(season)
+                if raw_season_dir.is_dir():
+                    for existing in sorted(raw_season_dir.glob(f"*/{filename}"), reverse=True):
+                        if existing.is_file() and existing.parent != raw:
+                            try:
+                                cached = json.loads(existing.read_text(encoding="utf-8"))
+                                if (
+                                    isinstance(cached, list)
+                                    and len(cached) == 1
+                                    and isinstance(cached[0], dict)
+                                    and cached[0].get("id") == params.get("id")
+                                ):
+                                    if (
+                                        expected_scores is not None
+                                        and expected_scores[0] is not None
+                                        and expected_scores[1] is not None
+                                    ):
+                                        box_pts = [
+                                            t.get("points")
+                                            for t in cached[0].get("teams", [])
+                                            if isinstance(t, dict) and t.get("points") is not None
+                                        ]
+                                        if sorted(box_pts) != sorted(expected_scores):
+                                            continue
+                                    payload = cached
+                                    from_cache = True
+                                    break
+                            except (OSError, ValueError):
+                                continue
+
+            if payload is None:
+                payload = api.get_json(endpoint, params)
+
             digest = _write_json(raw / filename, payload)
-            manifest["requests"].append(
-                {
-                    "endpoint": endpoint,
-                    "params": params,
-                    "file": filename,
-                    "retrieved_at_utc": _utc(),
-                    "sha256": digest,
-                }
-            )
+            req_entry = {
+                "endpoint": endpoint,
+                "params": params,
+                "file": filename,
+                "retrieved_at_utc": _utc(),
+                "sha256": digest,
+            }
+            if from_cache:
+                req_entry["cached"] = True
+            manifest["requests"].append(req_entry)
             _write_json(audit, manifest)
-            return payload
+            return payload, from_cache
 
         params = {"year": season, "seasonType": season_type, "classification": "fbs"}
         if week is not None:
             params["week"] = week
-        schedule = capture("/games", params, "games.json")
+        schedule, _ = capture("/games", params, "games.json")
         selected, exclusions = _select(schedule, season, season_type, week)
         manifest["exclusions"] = exclusions
         normalize_games(selected)
@@ -169,10 +213,17 @@ def ingest_cfbd_batch(
             raise DataValidationError("completed-game request limit exceeded")
         boxes = []
         for index, game in enumerate(completed):
-            if index > 0 and delay_seconds > 0:
-                time.sleep(delay_seconds)
             game_id = game["id"]
-            response = capture("/games/teams", {"id": game_id}, f"box_{game_id}.json")
+            expected = (game.get("homePoints"), game.get("awayPoints"))
+            response, from_cache = capture(
+                "/games/teams",
+                {"id": game_id},
+                f"box_{game_id}.json",
+                can_cache=True,
+                expected_scores=expected,
+            )
+            if not from_cache and index > 0 and delay_seconds > 0:
+                time.sleep(delay_seconds)
             if not isinstance(response, list) or len(response) != 1:
                 raise DataValidationError("ID-only box request must return exactly one game")
             if not isinstance(response[0], dict) or response[0].get("id") != game_id:

@@ -38,7 +38,7 @@ def resolve_team_names(data_dir: Path | str | None = None) -> dict[str | int, st
                         pass
             if len(names) > 50:
                 return names
-        except Exception:
+        except (OSError, json.JSONDecodeError, TypeError):
             pass
 
     # 2. Check datasets manifests
@@ -64,7 +64,7 @@ def resolve_team_names(data_dir: Path | str | None = None) -> dict[str | int, st
                             _extract_names_from_games(games, names)
                 if len(names) > 50:
                     break
-            except Exception:
+            except (OSError, json.JSONDecodeError, KeyError, TypeError):
                 continue
 
     # 3. Direct scan of raw cfbd archives if still incomplete
@@ -75,7 +75,7 @@ def resolve_team_names(data_dir: Path | str | None = None) -> dict[str | int, st
                 try:
                     games = json.loads(games_json.read_text(encoding="utf-8"))
                     _extract_names_from_games(games, names)
-                except Exception:
+                except (OSError, json.JSONDecodeError, KeyError, TypeError):
                     continue
 
     # Cache if found substantial names
@@ -83,7 +83,7 @@ def resolve_team_names(data_dir: Path | str | None = None) -> dict[str | int, st
         try:
             int_keys_only = {str(k): v for k, v in names.items() if isinstance(k, int)}
             cached_path.write_text(json.dumps(int_keys_only, indent=2), encoding="utf-8")
-        except Exception:
+        except (OSError, ValueError, TypeError):
             pass
 
     return names

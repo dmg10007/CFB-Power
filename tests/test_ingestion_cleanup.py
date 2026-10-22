@@ -24,6 +24,7 @@ def test_http_error_excludes_private_fields(monkeypatch, status):
         io.BytesIO(b"private response body fake-private-key"),
     )
     monkeypatch.setattr(api.urllib.request, "urlopen", Mock(side_effect=error))
+    monkeypatch.setattr(api.time, "sleep", Mock())
     with pytest.raises(api.CfbdHttpError) as caught:
         api.CfbdClient(api_key="fake-private-key").get_json("/games", {"year": 2026})
     assert str(caught.value) == f"CFBD request failed: HTTP {status}; endpoint /games"
